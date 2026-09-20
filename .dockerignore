@@ -1,0 +1,13 @@
+.git/
+.gitignore
+**/target/
+*.log
+.env*
+*.pem
+*.key
+node_modules/
+.devcontainer/
+.vscode/
+.idea/
+README.md
+LICENSE

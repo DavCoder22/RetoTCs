@@ -1,0 +1,57 @@
+name: smartbancs
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartbancs-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartbancs}
+      POSTGRES_USER: ${POSTGRES_USER:-smartbancs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartbancs}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartbancs} -d ${POSTGRES_DB:-smartbancs}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: smartbancs-api/Dockerfile
+      network: host
+    container_name: smartbancs-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smartbancs}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-smartbancs}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-smartbancs}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+      network: host
+    container_name: smartbancs-ai-service
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres-data:
