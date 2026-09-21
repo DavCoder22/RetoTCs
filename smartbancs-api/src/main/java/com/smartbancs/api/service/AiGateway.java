@@ -56,6 +56,11 @@ public class AiGateway {
             return objectMapper.readValue(response.body(), AiRecommendationResponse.class);
         } catch (ResponseStatusException ex) {
             throw ex;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            log.warn("ai_service interrupted: {}", ex.getMessage());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ai service interrupted: " + ex.getMessage());
         } catch (Exception ex) {
             log.warn("ai_service unreachable: {}", ex.getMessage());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "ai service unreachable: " + ex.getMessage());

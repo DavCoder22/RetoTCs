@@ -24,9 +24,9 @@ variable "openrouter_api_key" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (reto: se necesita RAM para Java+Python+observabilidad)."
+  description = "Tipo de instancia permitido por el Free Plan de esta cuenta (creada post-jul-2025): t3.micro/t3.small/t4g/c7i-flex.large/m7i-flex.large. t3.medium NO se puede lanzar (error 'not eligible for Free Tier'). m7i-flex.large = 8GB."
   type        = string
-  default     = "t3.medium"
+  default     = "m7i-flex.large"
 }
 
 variable "ami_id" {

@@ -36,7 +36,10 @@ data "aws_subnets" "default" {
   }
 }
 
+# Parámetro SSM SOLO si hay key (si el secret de GitHub no está configurado, se
+# omite y el agente en la EC2 cae a modo mock; evita el PutParameter vacío).
 resource "aws_ssm_parameter" "openrouter_api_key" {
+  count = var.openrouter_api_key != "" ? 1 : 0
   name  = "/smartbancs/openrouter-api-key"
   type  = "SecureString"
   value = var.openrouter_api_key
@@ -126,9 +129,13 @@ data "aws_iam_policy_document" "ec2_stack" {
     actions   = ["s3:GetObject"]
     resources = ["arn:aws:s3:::${var.state_bucket}/deploy/*"]
   }
+}
+
+data "aws_iam_policy_document" "ec2_ssm" {
+  count = var.openrouter_api_key != "" ? 1 : 0
   statement {
     actions   = ["ssm:GetParameter"]
-    resources = [aws_ssm_parameter.openrouter_api_key.arn]
+    resources = [aws_ssm_parameter.openrouter_api_key[0].arn]
   }
 }
 
@@ -146,6 +153,13 @@ resource "aws_iam_role_policy" "smartbancs_ec2_stack" {
   name   = "smartbancs-ec2-stack"
   role   = aws_iam_role.smartbancs_ec2.id
   policy = data.aws_iam_policy_document.ec2_stack.json
+}
+
+resource "aws_iam_role_policy" "smartbancs_ec2_ssm" {
+  count  = length(data.aws_iam_policy_document.ec2_ssm)
+  name   = "smartbancs-ec2-ssm"
+  role   = aws_iam_role.smartbancs_ec2.id
+  policy = data.aws_iam_policy_document.ec2_ssm[0].json
 }
 
 resource "aws_iam_instance_profile" "smartbancs_ec2" {

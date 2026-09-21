@@ -45,6 +45,8 @@ jobs:
     name: terraform plan
     runs-on: ubuntu-latest
     if: ${{ vars.AWS_ROLE_ARN != '' }}
+    env:
+      TF_VAR_openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY && secrets.OPENROUTER_API_KEY || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -89,7 +91,6 @@ jobs:
         run: |
           terraform plan \
             -var-file=terraform.tfvars.example \
-            -var="openrouter_api_key=" \
             -out=tfplan -no-color
 
   deploy:

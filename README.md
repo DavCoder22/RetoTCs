@@ -256,6 +256,16 @@ curl -s http://localhost:8081/health               # Agente de IA (FastAPI)
  y en la sección *Despliegue en AWS* de
  [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
+> **Free Plan (esta cuenta).** Creada tras jul-2025, este *Free Plan* solo
+> permite lanzar `t3.micro`, `t3.small`, `t4g.*`, `c7i-flex.large` y
+> `m7i-flex.large` (default elegido: `m7i-flex.large`); cualquier otro tipo
+> (p. ej. `t3.medium`) falla con *"The specified instance type is not eligible
+> for Free Tier"*.
+> **Modelo real vs mock.** Sin el secret `OPENROUTER_API_KEY` el stack igual
+> levanta y la IA responde en modo `mock` (el parámetro SSM no se crea). Para
+> usar OpenRouter en la EC2: añade el secret en GitHub → `Actions → terraform
+> deploy → Run workflow` (recreará la EC2 inyectando el SecureString por SSM).
+
 **6. Detén el stack:**
 
 ```bash

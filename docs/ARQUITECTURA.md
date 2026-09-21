@@ -292,7 +292,10 @@ flowchart TB
 2. **Provisionamiento con Terraform.** `terraform apply` usa la **VPC default**
    con su subred pública, crea el **security group** (22 SSH, 8080 API, 8081 IA,
    3333 Grafana, 9090 Prometheus, 3200 Tempo, 3100 Loki, 9187 postgres-exporter)
-   y la **EC2** (Amazon Linux 2023, `t3.medium`), con rol IAM para la instancia
+   y la **EC2** (Amazon Linux 2023, `m7i-flex.large` — la cuenta es un *Free
+   Plan* post-jul-2025: `t3.medium`/`t3.micro` se rechazan con *"not eligible
+   for Free Tier"*, solo los tipos del plan `t3.micro/t3.small/t4g.*/c7i-flex.
+   large/m7i-flex.large`), con rol IAM para la instancia
    (ECR pull · leer bundle de S3 · `GetParameter` de SSM) y *user-data* que:
    instala Docker + compose v2, baja de S3 el bundle
    (`docker-compose.yml` + `docker-compose.prod.yml` + `observability/`), escribe
