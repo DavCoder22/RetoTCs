@@ -1,0 +1,64 @@
+name: ai-service openrouter smoke
+
+# Verifica en CI el contrato de la IA: con el secret OPENROUTER_API_KEY del repo
+# la llamada es REAL a OpenRouter (source='openrouter'); sin él valida el mock.
+#
+# Para activar la comunicación real, crea el secret del repositorio:
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+#   Name:  OPENROUTER_API_KEY
+#   Value: (tu token sk-or-... de https://openrouter.ai/keys)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [ai-service/**, .github/workflows/ai-service.yml]
+  push:
+    branches: [develop, main]
+    paths: [ai-service/**, .github/workflows/ai-service.yml]
+
+env:
+  AI_MODEL: moonshotai/kimi-k2.6
+
+jobs:
+  verify-openrouter:
+    name: smoke test contrato de decision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: instalar dependencias del agente
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --quiet --upgrade pip
+          .venv/bin/pip install --quiet -r ai-service/requirements.txt
+
+      - name: arrancar ai-service
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          .venv/bin/uvicorn app.main:app --app-dir ai-service --host 127.0.0.1 --port 18081 > /tmp/ai.log 2>&1 &
+          echo $! > /tmp/ai.pid
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:18081/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:18081/health && echo " ai-service UP"
+
+      - name: smoke test (fuente esperada)
+        env:
+          AI_BASE_URL: http://127.0.0.1:18081
+          EXPECTED_SOURCE: ${{ secrets.OPENROUTER_API_KEY != '' && 'openrouter' || 'mock' }}
+        run: |
+          .venv/bin/python ai-service/smoke_test.py
+
+      - name: mostrar log del agente
+        if: always()
+        run: |
+          echo "expect_source=${{ secrets.OPENROUTER_API_KEY != '' && 'openrouter' || 'mock' }}"
+          tail -n 20 /tmp/ai.log || true
+          kill "$(cat /tmp/ai.pid)" 2>/dev/null || true

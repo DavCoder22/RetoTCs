@@ -244,6 +244,25 @@ la transacción vía worker/outbox).
 > Variables de entorno: `OPENROUTER_API_KEY`, `AI_MODEL` (por defecto
 > `moonshotai/kimi-k2.6`), `AI_HTTP_TIMEOUT`, `LOG_LEVEL`.
 
+**Contrato de respuesta (lo que el reto espera que conteste la IA).** El agente
+recibe el **contexto transaccional (DTO de entrada)** y devuelve una **decisión
+financiera personalizada (DTO de salida)** en un único JSON: `category`
+(`savings` · `spending` · `transfer` · `risk` · `generic`), `message` (consejo
+legible en español, específico y consciente del riesgo para un cliente
+PEN/USD), `priority` (`LOW`/`MEDIUM`/`HIGH`) e `insights` (razonamiento de
+apoyo), más `recommendationId`, `customerId`, `model`, `source`
+(`openrouter`|`mock`) y `generatedAt`. El `SYSTEM_PROMPT` del proveedor obliga
+al modelo a responder solo ese esquema (`ai-service/app/providers.py`).
+
+**CI con el token (GitHub Actions).** El workflow
+[`.github/workflows/ai-service.yml`](.github/workflows/ai-service.yml) levanta
+el `ai-service` y ejecuta `ai-service/smoke_test.py`. Para que la llamada sea
+**real a OpenRouter**, crea un secret en el repositorio con el nombre
+`OPENROUTER_API_KEY` (Settings → Secrets and variables → Actions →
+New repository secret) y el workflow validará que la IA conteste con
+`source="openrouter"`; sin secret valida el fallback (`source="mock"`).
+También puedes correrlo local: `EXPECTED_SOURCE=mock python3 ai-service/smoke_test.py`.
+
 ## 9. Observabilidad
 
 Se levanta con el mismo `docker compose` y queda integrado **Prometheus**
