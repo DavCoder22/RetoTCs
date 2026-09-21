@@ -145,6 +145,21 @@ flowchart LR
 > plantuml.com, VS Code (extensión PlantUML) o tu IDE favorito. Versión en texto
 > ASCII dentro de [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
+**Capacidad, redundancia y no pérdida de datos (resumen)** — detalle completo en
+[`docs/ARQUITECTURA.md` §7.1](docs/ARQUITECTURA.md):
+
+- El objetivo de **≥ 10 000 transacciones** se cubre replicando las capas **sin
+  estado** (`api` + `ai-service`) detrás de un **ALB**, manteniendo una
+  **única PostgreSQL ACID** y el worker de outbox activo solo en el primario
+  (`SMARTBANCS_AI_WORKER_ENABLED=false` en la réplica). Activación:
+  `terraform apply -var="redundancy_enabled=true"`.
+- La EC2 usa una **dirección elástica (Elastic IP)**: la URL pública no cambia
+  aunque la instancia se sustituya (cero pérdida de conectividad/datos del lado
+  del cliente).
+- La BBDD persiste en un **volumen EBS dedicado** montado en `/var/lib/docker`
+  (xfs + fstab): sobrevive a reboots y sustituciones; backups `pg_dump` en
+  `s3://smartbancs-tfstate/deploy/backups/`.
+
 ## 6. Estructura del repositorio
 
 ```

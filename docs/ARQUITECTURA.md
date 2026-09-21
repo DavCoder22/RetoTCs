@@ -294,9 +294,63 @@ flowchart TB
    `OPENROUTER_API_KEY` → `TF_VAR_openrouter_api_key` → `aws_ssm_parameter`
    (`/smartbancs/openrouter-api-key`, **SecureString**) → la EC2 la lee solo en
    el arranque. Si no hay clave, el agente cae a su **modo mock**.
-4. **Acceso público.** El security group habilita los puertos de demo a la IP
-   pública de la instancia. *(Mejora recomendada: ALB + TLS con ACM para
-   producción, y cerrar SSH/observabilidad.)*
+4. **Accesso público + dirección estable (anti pérdida de datos).** La EC2 lleva
+    una **dirección elástica (Elastic IP)** (`aws_eip`): si la instancia se
+    sustituye por cualquier motivo, la IP pública NO cambia, por lo que la API,
+    la IA y las URLs de observabilidad nunca se quedan en el aire y no hay
+    pérdida de conectividad para los clientes.
+ 5. **Persistencia de datos dedicada.** La BBDD PostgreSQL persiste en un
+    **volumen EBS gp3 dedicado** (`aws_ebs_volume` + `aws_volume_attachment`).
+    El *user-data* lo monta de forma idempotente en `/var/lib/docker` (xfs +
+    `fstab` con `nofail`): *postgres-data* sobrevive a **reboots y sustituciones**
+    de la EC2 (el recurso se des-acopla/re-acopla automáticamente), y el rol de
+    la instancia puede **subir volcados** a `s3://…/deploy/backups/` para
+    recuperación ante desastres (`pg_dump` + restore documentados).
+
+### 7.1 Redundancia y demanda (≥ 10 000 transacciones)
+
+La transacción (REST + outbox) responde en el camino crítico **sin tocar a la
+IA** y persiste con `FOR UPDATE` + `version`; eso hace que **una** réplica se
+sature solo por CPU/IO del API y la BBDD. Para cubrir el objetivo de
+**10 000 tps** (y picos), el plan escala **capas sin estado** manteniendo una
+**única BBDD ACID** (integridad transaccional):
+
+```mermaid
+flowchart TB
+    subgraph LB["Application Load Balancer (smartbancs-alb)"]
+        L80["Listener :80 → target api:8080"]
+    end
+    L80 --> P["EC2 primario · smartbancs-demo\napi + ai-service + postgres (ACID) + observabilidad"]
+    L80 --> A["EC2 réplica app · smartbancs-demo-app\nSOLO api + ai-service (sin postgres)"]
+
+    P --> PG[("PostgreSQL única\naccounts · ledger · outbox_events")]
+    A -.->|"jdbc a IP privada del primario"| PG
+    P -->|"worker outbox (único activo)"| AI["ai-service"]
+    A --> AI2["ai-service local"]
+```
+
+- **`api` + `ai-service` son stateless**: se replican tras un **ALB** (health
+  check `/actuator/health`). La réplica `app` arranca con
+  `SMARTBANCS_ROLE=app`: compose solo con `api ai-service`, datasource apuntando
+  a la **IP privada del primario** y `SMARTBANCS_AI_WORKER_ENABLED=false`.
+- El **outbox lo consume un solo worker** (el del primario)
+  (`@ConditionalOnProperty(smartbancs.ai.worker.enabled)`: el gate está en
+  `RecommendationWorker`), así no hay recomendaciones duplicadas pese a que la
+  capa de API se duplica.
+- **Capacidad estimada conservadora:** un `api` Spring + virtual threads maneja
+  miles de tps de ingesta (escribir transacción + outbox) en un `t3.small`; con
+  2 réplicas + cola/lotes (ETL `POST /transactions/batch` con throttling e
+  idempotencia) se cubre cómodamente el SLO de 10 000 con reserva.
+- **Activación** (crea ALB + 2ª instancia):
+
+  ```bash
+  terraform apply -var-file=terraform.tfvars.example -var="redundancy_enabled=true"
+  # URL única del ALB en el output: lb_dns (http://…)
+  ```
+
+  Para volver a la instancia única: `-var="redundancy_enabled=false"` (degrada
+  el ALB y la réplica). El ALB tiene coste (~$18/mes + LCU); las EC2 `t3.small`
+  entran en el Free Plan de la cuenta.
 
 **¿Por qué EC2 + imágenes Docker?**
 
@@ -318,7 +372,7 @@ flowchart TB
 | Concurrencia y race conditions (FOR UPDATE + version) | ✅ Implementado | `TransactionService` |
 | Esquema DDL/DML | ✅ Flyway | `smartbancs-infra/src/main/resources/db/migration/V1|V2` |
 | IaC entorno (Docker Compose) | ✅ Implementado | `docker-compose.yml` |
-| IaC AWS (Terraform + OIDC) | ✅ Implementado (EC2 + ECR + SSM, images desde ECR) | `terraform/`, `deploy/`, `docker-compose.prod.yml` + workflow `terraform-ci` |
+| IaC AWS (Terraform + OIDC) | ✅ EC2 + ECR + SSM + Elastic IP + EBS persistente; opción ALB/redundancia | `terraform/`, `deploy/`, `docker-compose.prod.yml` + workflow `terraform-ci` |
 | Patrón outbox (tabla/repositorio) | ✅ Tabla/repo listos; relayer pendiente | `outbox_events`, `OutboxEventJpaRepository` |
 | ETL / transformación + fact table | ✅ Implementado | `etl/` + `POST /transactions/batch` |
 | Agente de IA (Python/FastAPI, asíncrono, OpenRouter + mock) | ✅ Funcional y no bloqueante | `ai-service` |

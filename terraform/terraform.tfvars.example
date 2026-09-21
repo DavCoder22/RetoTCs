@@ -10,3 +10,9 @@ openrouter_api_key = ""
 instance_type      = "t3.small"
 image_tag          = "latest"
 allowed_cidr       = "0.0.0.0/0"
+# Volumen EBS dedicado a BBDD montado en /var/lib/docker (persiste ante replace).
+postgres_volume_size_gb = 20
+# ESTRATEGIA DE REDUNDANCIA (>=10.000 tx): ALB + 2ª EC2 api/ai con BBDD única.
+#   true  => terraform apply crea el ALB y la 2ª instancia (cobra ~$18/mes ALB).
+#   false => instancia única (estado actual de la demo).
+redundancy_enabled = false

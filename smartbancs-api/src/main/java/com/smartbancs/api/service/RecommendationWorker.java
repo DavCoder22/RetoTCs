@@ -8,6 +8,7 @@ import com.smartbancs.infra.repository.OutboxEventJpaRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,6 +24,7 @@ import java.util.List;
  * - Reintentos con backoff por intento (limite configurable); al superarlo el evento pasa a FAILED.
  * - El agente (Python/FastAPI + OpenRouter) responde un DTO; aquí se persiste en `recommendations`.
  */
+@ConditionalOnProperty(name = "smartbancs.ai.worker.enabled", havingValue = "true", matchIfMissing = true)
 @Component
 public class RecommendationWorker {
 

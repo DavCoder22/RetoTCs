@@ -59,6 +59,22 @@ variable "root_volume_size_gb" {
   default     = 30
 }
 
+variable "postgres_volume_size_gb" {
+  description = "Volumen EBS dedicado para la BBDD. El bootstrap lo monta en /var/lib/docker: 'postgres-data' persiste ante sustitución de la EC2 y no hay pérdida de datos."
+  type        = number
+  default     = 20
+}
+
+variable "redundancy_enabled" {
+  description = <<-EOT
+    true => activa la ESTRATEGIA DE REDUNDANCIA para cubrir la demanda (>10.000 tx):
+    un ALB delante y una 2ª EC2 (solo api+ai) replicando las capas sin estado;
+    la BBDD única (ACID) queda en el primario. false => instancia única (actual).
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = "Tag de las imágenes en ECR (por defecto latest)."
   type        = string
