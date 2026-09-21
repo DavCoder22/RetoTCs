@@ -24,7 +24,7 @@ Required deliverables: a technical document, a runnable **MVP** hosted in a Git 
 | REST CRUD: customers, accounts, transactions + transfers/ledger | Done |
 | AI async service | Pending |
 | ETL / data warehouse load | Pending |
-| Observability (metrics, logs, traces) | Pending |
+| Observability (metrics, logs, traces) | Done |
 | Incident simulation + post mortem | Pending |
 | Final documentation + evidence | Pending |
 
@@ -47,7 +47,8 @@ RetoTCs/
 ├─ db/                     # Raw DDL / DML scripts (challenge requirement)
 ├─ scripts/                # Load tests, seed data, evidence
 ├─ docs/                   # Architecture, ADRs, incident, post mortem, defense
-└─ docker-compose.yml      # Local MVP: PostgreSQL 16 + api + ai-service
+├─ observability/          # Prometheus, Tempo, Loki, Promtail + Grafana (provisioned)
+└─ docker-compose.yml      # Local MVP: PostgreSQL 16 + api + ai-service + observability stack
 ```
 
 ## How to run the project (local MVP with Docker)
@@ -80,6 +81,25 @@ Prerequisites: **Docker** with the Compose plugin.
    ```
 
    Remove data volumes too with `docker compose down -v`.
+
+> **Docker rootless (Linux):** si `promtail` no encuentra el daemon, exporta las
+> rutas antes de `docker compose up`:
+> `DOCKER_SOCKET=/run/user/$UID/docker.sock` y
+> `DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers`.
+
+## Observabilidad (metrics · logs · traces)
+
+El stack de observabilidad se levanta con el mismo `docker compose` y queda
+lista la integración de **Prometheus** (métricas), **Tempo** (traces OTLP) y
+**Loki** (logs JSON) con **Grafana** ya provisionada:
+
+- Grafana (dashboard "SmartBancs - Observabilidad"): `http://localhost:3333` — usuario `admin`, contraseña `admin` (configurable vía `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`). Si `3333` está ocupado, cambia `GRAFANA_HOST_PORT`.
+- Prometheus: `http://localhost:9090` · Tempo: `http://localhost:3200` · Loki: `http://localhost:3100`
+- Métricas: `http://localhost:8080/actuator/prometheus` y `http://localhost:8081/actuator/prometheus`
+- Cada transacción expone métricas de negocio (`smartbancs_transactions_total`, `smartbancs_transaction_duration_seconds`, `smartbancs_transaction_amount_*`), trazas y logs correlacionados por `traceId`.
+
+Detalle completo (arquitectura, instrumentación, queries, verificación y
+troubleshooting): [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md).
 
 ## Demo y evidencia
 

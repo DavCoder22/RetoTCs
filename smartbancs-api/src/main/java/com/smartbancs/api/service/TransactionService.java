@@ -30,13 +30,16 @@ public class TransactionService {
     private final TransactionJpaRepository transactionRepository;
     private final AccountJpaRepository accountRepository;
     private final LedgerEntryJpaRepository ledgerEntryRepository;
+    private final TransactionMetrics metrics;
 
     public TransactionService(TransactionJpaRepository transactionRepository,
                               AccountJpaRepository accountRepository,
-                              LedgerEntryJpaRepository ledgerEntryRepository) {
+                              LedgerEntryJpaRepository ledgerEntryRepository,
+                              TransactionMetrics metrics) {
         this.transactionRepository = transactionRepository;
         this.accountRepository = accountRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
+        this.metrics = metrics;
     }
 
     @Transactional(readOnly = true)
@@ -78,29 +81,38 @@ public class TransactionService {
     public TransactionResponse create(TransactionType type, BigDecimal amount, String currency,
                                       UUID debitAccountId, UUID creditAccountId,
                                       String idempotencyKey, String reference) {
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            TransactionEntity existing = transactionRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
-            if (existing != null) {
-                return toResponse(existing.toDomain());
+        long startNanos = metrics.start();
+        try {
+            if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+                TransactionEntity existing = transactionRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
+                if (existing != null) {
+                    metrics.recordIdempotent(existing.toDomain().getType());
+                    return toResponse(existing.toDomain());
+                }
             }
+            TransactionEntity saved = switch (type) {
+                case DEPOSIT -> {
+                    requireAccount(creditAccountId, "creditAccountId");
+                    yield processDeposit(creditAccountId, amount, currency, idempotencyKey, reference);
+                }
+                case WITHDRAWAL, PAYMENT -> {
+                    requireAccount(debitAccountId, "debitAccountId");
+                    yield processDebit(type, debitAccountId, amount, currency, idempotencyKey, reference);
+                }
+                case TRANSFER -> {
+                    requireAccount(debitAccountId, "debitAccountId");
+                    requireAccount(creditAccountId, "creditAccountId");
+                    yield processTransfer(debitAccountId, creditAccountId, amount, currency, idempotencyKey, reference);
+                }
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported transaction type");
+            };
+            TransactionResponse response = toResponse(saved.toDomain());
+            metrics.recordSuccess(type, response.amount(), startNanos);
+            return response;
+        } catch (RuntimeException ex) {
+            metrics.recordFailure(type, amount, startNanos);
+            throw ex;
         }
-        TransactionEntity saved = switch (type) {
-            case DEPOSIT -> {
-                requireAccount(creditAccountId, "creditAccountId");
-                yield processDeposit(creditAccountId, amount, currency, idempotencyKey, reference);
-            }
-            case WITHDRAWAL, PAYMENT -> {
-                requireAccount(debitAccountId, "debitAccountId");
-                yield processDebit(type, debitAccountId, amount, currency, idempotencyKey, reference);
-            }
-            case TRANSFER -> {
-                requireAccount(debitAccountId, "debitAccountId");
-                requireAccount(creditAccountId, "creditAccountId");
-                yield processTransfer(debitAccountId, creditAccountId, amount, currency, idempotencyKey, reference);
-            }
-            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported transaction type");
-        };
-        return toResponse(saved.toDomain());
     }
 
     private TransactionEntity processDeposit(UUID creditAccountId, BigDecimal amount, String currency,

@@ -27,10 +27,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tempo:
+        condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smartbancs}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-smartbancs}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-smartbancs}
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
     ports:
       - "8080:8080"
     healthcheck:
@@ -45,6 +48,10 @@ services:
       dockerfile: ai-service/Dockerfile
       network: host
     container_name: smartbancs-ai-service
+    depends_on:
+      - tempo
+    environment:
+      OTLP_TRACING_ENDPOINT: http://tempo:4318/v1/traces
     ports:
       - "8081:8081"
     healthcheck:
@@ -53,5 +60,94 @@ services:
       timeout: 5s
       retries: 12
 
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: smartbancs-prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: smartbancs-tempo
+    command: ['-config.file=/etc/tempo.yml']
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: smartbancs-loki
+    command: ['-config.file=/etc/loki-config.yml']
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: smartbancs-promtail
+    depends_on:
+      loki:
+        condition: service_healthy
+    volumes:
+      - ./observability/promtail/promtail.yml:/etc/promtail/config.yml:ro
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${DOCKER_CONTAINERS_DIR:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: smartbancs-grafana
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: http://localhost:${GRAFANA_HOST_PORT:-3333}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_HOST_PORT:-3333}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 volumes:
   postgres-data:
+  tempo-data:
+  loki-data:
+  grafana-data:

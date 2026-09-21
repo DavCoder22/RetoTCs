@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  - job_name: 'smartbancs-api'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['api:8080']
+        labels:
+          service: smartbancs-api
+
+  - job_name: 'smartbancs-ai-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['ai-service:8081']
+        labels:
+          service: smartbancs-ai-service
