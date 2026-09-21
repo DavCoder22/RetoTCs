@@ -129,16 +129,28 @@ jobs:
           aws ecr create-repository --repository-name smartbancs-api --region "${AWS_REGION}" >/dev/null 2>&1 || true
           aws ecr create-repository --repository-name smartbancs-ai-service --region "${AWS_REGION}" >/dev/null 2>&1 || true
 
+      # El JAR se compila en el runner (con caché Maven): el build de la imagen
+      # Docker NO descarga dependencias -> se elimina el 403 de Maven Central
+      # dentro de `docker build` que hacía fallar este job intermitentemente.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: build jar (runner)
+        run: mvn -B -ntp -pl smartbancs-api -am clean package -DskipTests
+
       - name: build + push imágenes (api, ai-service)
         run: |
           account="$(aws sts get-caller-identity --query Account --output text)"
           registry="${account}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${registry}" >/dev/null
-          docker compose build api ai-service
-          docker tag smartbancs-api:latest "${registry}/smartbancs-api:latest"
-          docker tag smartbancs-ai-service:latest "${registry}/smartbancs-ai-service:latest"
+          docker build -f smartbancs-api/Dockerfile.runtime -t "${registry}/smartbancs-api:latest" .
           docker push "${registry}/smartbancs-api:latest"
+          docker compose build ai-service
+          docker tag smartbancs-ai-service:latest "${registry}/smartbancs-ai-service:latest"
           docker push "${registry}/smartbancs-ai-service:latest"
 
       - name: empaqueta bundle de despliegue (compose + observability)

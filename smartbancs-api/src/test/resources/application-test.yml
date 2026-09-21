@@ -1,0 +1,21 @@
+# Perfil de TEST (integración): la BBDD es un PostgreSQL REAL levantado con
+# Testcontainers (imagen postgres:16-alpine), Flyway aplica las migraciones
+# V1/V2 (esquema + seed). Se desactiva el tracing OTLP para no depender de un
+# collector, y el agente IA se sustituye por un @MockBean en los tests.
+management:
+  tracing:
+    sampling:
+      probability: 0.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318
+
+smartbancs:
+  ai:
+    base-url: http://localhost:18081
+    timeout-ms: 2000
+    worker:
+      delay-ms: 500
+      initial-delay-ms: 500
+      batch-size: 10
+      max-attempts: 3

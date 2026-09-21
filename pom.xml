@@ -26,10 +26,21 @@
         <spring-boot.version>3.4.5</spring-boot.version>
         <springdoc.version>2.8.6</springdoc.version>
         <logstash-logback.version>8.0</logstash-logback.version>
+        <!-- docker-java nuevo: negocia API >= 1.40 (daemons recientes/rootless) en los tests Testcontainers -->
+        <testcontainers.version>1.21.3</testcontainers.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Primero el BOM de Testcontainers (docker-java moderno para daemons
+                 rootless/recientes); spring-boot-dependencies se aplica después. -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>

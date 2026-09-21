@@ -1,0 +1,40 @@
+name: api tests (integración)
+
+# Pruebas de integración del backend Java:
+#   - Flujo completo: POST /customers -> /accounts -> /transactions -> outbox
+#     -> worker asíncrono -> GET /recommendations (READY), contra un PostgreSQL
+#     real levantado con Testcontainers (el agente IA se simula con @MockBean).
+#   - Idempotencia: el reenvío con la misma idempotencyKey no duplica la
+#     transacción.
+# No requiere secretos ni servicios externos: Testcontainers arranca un
+# contenedor postgres:16-alpine en el runner (docker disponible).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pom.xml"
+      - "smartbancs-*/**"
+      - ".github/workflows/api-ci.yml"
+  push:
+    branches: [develop, main]
+    paths:
+      - "pom.xml"
+      - "smartbancs-*/**"
+      - ".github/workflows/api-ci.yml"
+
+jobs:
+  integration-tests:
+    name: mvn verify (Testcontainers PostgreSQL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: tests de integración
+        run: mvn -B -ntp -pl smartbancs-api -am verify
