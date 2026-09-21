@@ -147,6 +147,9 @@ jobs:
           registry="${account}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${registry}" >/dev/null
+          # .release/ queda fuera del .dockerignore global (**/target/):
+          # la imagen runtime solo recibe el JAR compilado en el runner.
+          mkdir -p .release && cp smartbancs-api/target/smartbancs-api-*.jar .release/app.jar
           docker build -f smartbancs-api/Dockerfile.runtime -t "${registry}/smartbancs-api:latest" .
           docker push "${registry}/smartbancs-api:latest"
           docker compose build ai-service
