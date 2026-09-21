@@ -1,0 +1,18 @@
+# Override de PRODUCCIÓN: construye las imágenes en CI y las publica a ECR;
+# en la EC2 solo se hace PULL (nunca build). Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  api:
+    image: ${ECR_REGISTRY}/smartbancs-api:${IMAGE_TAG:-latest}
+    build: !reset null
+    pull_policy: always
+
+  ai-service:
+    image: ${ECR_REGISTRY}/smartbancs-ai-service:${IMAGE_TAG:-latest}
+    build: !reset null
+    pull_policy: always
+
+  grafana:
+    environment:
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3333}
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}

@@ -1,2 +1,9 @@
-region  = "us-east-1"
-profile = ""
+region             = "us-east-1"
+profile            = ""
+state_bucket       = "smartbancs-tfstate"
+# openrouter_api_key se inyecta SOLO desde CI (secret OPENROUTER_API_KEY) o tu
+# consola; nunca pongas el valor aquí (lo más seguro: dejarlo vacío).
+openrouter_api_key = ""
+instance_type      = "t3.medium"
+image_tag          = "latest"
+allowed_cidr       = "0.0.0.0/0"

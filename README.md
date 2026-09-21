@@ -163,8 +163,10 @@ RetoTCs/
 ├─ scripts/                # demo.sh (evidencia reproducible) · aws-configure.sh
 ├─ docs/                   # Documentación técnica (en español · incluye arquitectura.puml)
 ├─ observability/          # Prometheus · Tempo · Loki · Promtail · Grafana (provisionada)
-├─ terraform/              # IaC para AWS + workflow OIDC
-└─ docker-compose.yml      # MVP local: PostgreSQL + api + ai-service + observabilidad
+├─ terraform/              # IaC para AWS: EC2 + ECR + SSM (tfvars de ejemplo incluidos)
+├─ deploy/                 # ec2_bootstrap.sh.tpl — user-data de arranque de la EC2
+├─ docker-compose.yml      # MVP local: PostgreSQL + api + ai-service + observabilidad
+└─ docker-compose.prod.yml # Override de producción: imágenes desde ECR (build: !reset)
 ```
 
 ## 7. Puesta en marcha (MVP con Docker)
@@ -244,10 +246,12 @@ curl -s http://localhost:8081/health               # Agente de IA (FastAPI)
 
 **5.2 Despliega en AWS (Terraform + EC2).** El mismo stack —las **imágenes
  Docker** del repositorio— se despliega en **instancias EC2** de AWS con
- **Terraform**; el security group expone la **API públicamente por el puerto
- 8080** (IP pública/DNS de la instancia) para este reto mientras el resto de
- servicios queda en la red interna. Requiere GitHub Actions con OIDC y el secret
- `OPENROUTER_API_KEY`. Comandos y detalle en [`terraform/`](terraform), en el
+ **Terraform**; el security group expone para la demo: **API `:8080`**, agente
+ de IA `:8081`, **Grafana `:3333`**, Prometheus `:9090`, Tempo `:3200`, Loki
+ `:3100` y postgres-exporter `:9187` (accesibles por la IP pública de la
+ instancia). Requiere GitHub Actions con OIDC y el secret `OPENROUTER_API_KEY`
+ (se inyecta por SSM en la EC2 al arrancar). Comandos y detalle en
+ [`terraform/`](terraform), en el
  workflow [`.github/workflows/terraform-ci.yml`](.github/workflows/terraform-ci.yml)
  y en la sección *Despliegue en AWS* de
  [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
@@ -290,14 +294,20 @@ la transacción vía worker/outbox).
 > `moonshotai/kimi-k2.6`), `AI_HTTP_TIMEOUT`, `LOG_LEVEL`.
 
 **Contrato de respuesta (lo que el reto espera que conteste la IA).** El agente
-recibe el **contexto transaccional (DTO de entrada)** y devuelve una **decisión
-financiera personalizada (DTO de salida)** en un único JSON: `category`
-(`savings` · `spending` · `transfer` · `risk` · `generic`), `message` (consejo
-legible en español, específico y consciente del riesgo para un cliente
-PEN/USD), `priority` (`LOW`/`MEDIUM`/`HIGH`) e `insights` (razonamiento de
-apoyo), más `recommendationId`, `customerId`, `model`, `source`
-(`openrouter`|`mock`) y `generatedAt`. El `SYSTEM_PROMPT` del proveedor obliga
-al modelo a responder solo ese esquema (`ai-service/app/providers.py`).
+recibe el **contexto (DTO de entrada)**: movimiento (`type`, `amount`,
+`currency`, saldos posteriores) **más información general del cliente**
+(`customerSegment`: RETAIL/PREMIUM/CORPORATE y `accountAgeDays`), y devuelve una
+**decisión financiera estandarizada (DTO de salida)** — lo que el cliente
+**debería hacer**, como lo haría la entidad bancaria — en un único JSON:
+`category` (normalizado: `savings` · `spending` · `transfer` · `risk` ·
+`generic`), `message` (consejo legible en español, específico y consciente del
+riesgo PEN/USD), `priority` (`LOW`/`MEDIUM`/`HIGH`), `insights` (razonamiento,
+≤10) y `actions` (**acciones concretas sugeridas**, 1–5), más
+`recommendationId`, `customerId`, `model`, `source` (`openrouter`|`mock`) y
+`generatedAt`. La salida pasa por una **normalización** en
+`ai-service/app/providers.py`, así la API siempre contesta el mismo esquema con
+valores acotados (sea el modelo real o el mock), lo que hace el consumo óptimo y
+predecible.
 
 **CI con el token (GitHub Actions).** El workflow
 [`.github/workflows/ai-service.yml`](.github/workflows/ai-service.yml) levanta

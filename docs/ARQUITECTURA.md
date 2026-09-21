@@ -258,8 +258,9 @@ que autentica **GitHub Actions contra AWS mediante OIDC** (sin credenciales
 estáticas en el repositorio).
 
 **Estrategia de despliegue:** el mismo stack del MVP local (construido por
-`docker compose`) se despliega en **instancias EC2** de AWS y la **API queda
-accesible públicamente** desde Internet.
+`docker compose`) se despliega en una **instancia EC2** de AWS que levanta
+imágenes desde **ECR**, y la **API + observabilidad quedan accesibles
+públicamente** desde Internet para la demo.
 
 > Diagrama de despliegue (PlantUML): tercer bloque de
 > [`docs/arquitectura.puml`](arquitectura.puml). La vista Mermaid siguiente se
@@ -267,7 +268,7 @@ accesible públicamente** desde Internet.
 
 ```mermaid
 flowchart TB
-    USER["Usuario final / Cliente"] -->|"acceso público a la API (8080)"| SG["Security Group\n8080 API · 3333 Grafana · 22 SSH"]
+    USER["Usuario final / Cliente"] -->|"acceso público a la API (8080)"| SG["Security Group\n8080 API · 8081 IA\n3333 Grafana · 9090 Prom\n3200 Tempo · 3100 Loki · 9187 exp"]
     SG --> EC2["EC2 · Amazon Linux 2023\nDocker Engine"]
 
     subgraph EC2["docker compose up (imágenes Docker)"]
@@ -278,26 +279,32 @@ flowchart TB
     end
 
     ECR["Amazon ECR\nimágenes del stack"] -. "docker pull" .-> EC2
-    GHA["GitHub Actions · OIDC\nterraform-ci.yml"] -->|"terraform apply\nprovisiona VPC · EC2 · SG"| EC2
+    GHA["GitHub Actions · OIDC\nterraform-ci.yml"] -->|"terraform apply\nprovisiona EC2 · SG"| EC2
     GHA -. "docker build + push" .-> ECR
 ```
 
 **Cómo se desplega (paso a paso):**
 
-1. **Imágenes Docker.** Se construyen las imágenes del stack (las mismas de los
-   `Dockerfile` del repositorio: `smartbancs-api`, `ai-service`, la
-   observabilidad) y se suben a **Amazon ECR**. *(En una primera pasada pueden
-   cargarse directamente en la instancia vía `docker save`/`load`.)*
-2. **Provisionamiento con Terraform.** `terraform apply` crea la **VPC** con
-   subred pública, **Internet Gateway**, **security groups** y las **instancias
-   EC2** (Amazon Linux 2023 con Docker Engine instalado).
-3. **Levantar el stack.** En cada EC2: `docker compose up` con las imágenes
-   (`pull` desde ECR). Postgres y la observabilidad dejan de exponerse;
-   permanecen internos dentro de la VPC.
-4. **Acceso público a la API.** El security group habilita **TCP/8080** a
-   Internet vía la **IP pública o DNS** asignados a la instancia. El resto de
-   puertos (Postgres, Tempo, Loki, Grafana por defecto) solo se alcanzan desde
-   la red interna. *(Mejora recomendada: ALB + TLS con ACM para producción.)*
+1. **Imágenes Docker.** El workflow `terraform-ci` construye las imágenes del
+   stack (`smartbancs-api`, `ai-service`) y las sube a **Amazon ECR**
+   (`ecr_repos`). La observabilidad usa imágenes públicas de Docker Hub. La EC2
+   **nunca buildea**: solo hace `pull` desde ECR/registro público.
+2. **Provisionamiento con Terraform.** `terraform apply` usa la **VPC default**
+   con su subred pública, crea el **security group** (22 SSH, 8080 API, 8081 IA,
+   3333 Grafana, 9090 Prometheus, 3200 Tempo, 3100 Loki, 9187 postgres-exporter)
+   y la **EC2** (Amazon Linux 2023, `t3.medium`), con rol IAM para la instancia
+   (ECR pull · leer bundle de S3 · `GetParameter` de SSM) y *user-data* que:
+   instala Docker + compose v2, baja de S3 el bundle
+   (`docker-compose.yml` + `docker-compose.prod.yml` + `observability/`), escribe
+   `.env` con la clave y ejecuta `docker compose -f docker-compose.yml
+   -f docker-compose.prod.yml up -d`.
+3. **Clave OpenRouter (sin secretos en el repo).** El secret de GitHub
+   `OPENROUTER_API_KEY` → `TF_VAR_openrouter_api_key` → `aws_ssm_parameter`
+   (`/smartbancs/openrouter-api-key`, **SecureString**) → la EC2 la lee solo en
+   el arranque. Si no hay clave, el agente cae a su **modo mock**.
+4. **Acceso público.** El security group habilita los puertos de demo a la IP
+   pública de la instancia. *(Mejora recomendada: ALB + TLS con ACM para
+   producción, y cerrar SSH/observabilidad.)*
 
 **¿Por qué EC2 + imágenes Docker?**
 
@@ -319,7 +326,7 @@ flowchart TB
 | Concurrencia y race conditions (FOR UPDATE + version) | ✅ Implementado | `TransactionService` |
 | Esquema DDL/DML | ✅ Flyway | `smartbancs-infra/src/main/resources/db/migration/V1|V2` |
 | IaC entorno (Docker Compose) | ✅ Implementado | `docker-compose.yml` |
-| IaC AWS (Terraform + OIDC) | ✅ Scaffolding | `terraform/` + `.github/workflows/terraform-ci.yml` |
+| IaC AWS (Terraform + OIDC) | ✅ Implementado (EC2 + ECR + SSM, images desde ECR) | `terraform/`, `deploy/`, `docker-compose.prod.yml` + workflow `terraform-ci` |
 | Patrón outbox (tabla/repositorio) | ✅ Tabla/repo listos; relayer pendiente | `outbox_events`, `OutboxEventJpaRepository` |
 | ETL / transformación + fact table | ✅ Implementado | `etl/` + `POST /transactions/batch` |
 | Agente de IA (Python/FastAPI, asíncrono, OpenRouter + mock) | ✅ Funcional y no bloqueante | `ai-service` |
