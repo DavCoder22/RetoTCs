@@ -98,7 +98,7 @@ una descripción del recorrido grabado.
 | Entorno local | **Docker** + **Docker Compose** (infraestructura como código) |
 | Entorno de desarrollo | **Devcontainer** reproducible (JDK 21 + Maven + Docker) |
 | Observabilidad | **Prometheus**, **Tempo** (OTLP), **Loki** + **Promtail** y **Grafana** provisionada |
-| Despliegue (AWS) | **Terraform** + **GitHub Actions** (OIDC) |
+| Despliegue (AWS) | **Terraform** → **instancias EC2** corriendo las **imágenes Docker** del repo · **GitHub Actions** (OIDC) |
 
 ## 5. Arquitectura
 
@@ -171,8 +171,16 @@ RetoTCs/
 
 **Prerrequisito:** Docker con el plugin de Compose.
 
-**1. Configuración (opcional).** Copia `.env.example` a `.env` y define tus
-propias credenciales.
+**1. Configura el entorno (opcional):**
+
+```bash
+cp .env.example .env        # edita credenciales si quieres (OPCIONAL)
+```
+
+> La IA queda operativa **con o sin API key**: si `OPENROUTER_API_KEY` está
+> vacía, el agente usa un **mock avanzado y funcional** (`source="mock"`); si le
+> pones tu token de [OpenRouter](https://openrouter.ai/keys), llama al modelo
+> real `moonshotai/kimi-k2.6` (`source="openrouter"`).
 
 **2. Construye y levanta el stack:**
 
@@ -180,39 +188,76 @@ propias credenciales.
 docker compose up --build -d
 ```
 
-**3. Verifica el estado de salud:**
+**3. Verifica que todo esté `healthy`:**
 
 ```bash
 docker compose ps
 ```
 
-Deben quedar `healthy`: PostgreSQL, API, agente de IA y toda la capa de
-observabilidad.
+Deben quedar `healthy` (o `Up`) los servicios. Si algo quedó mal, revisa los
+logs del servicio: `docker compose logs -f <servicio>` (p. ej. `api`,
+`ai-service`, `prometheus`).
 
-**4. Endpoints disponibles:**
-
-| Servicio | URL |
-| --- | --- |
-| API · health | `http://localhost:8080/actuator/health` |
-| API · Swagger UI | `http://localhost:8080/swagger-ui.html` |
-| API · OpenAPI spec | `http://localhost:8080/v3/api-docs` |
-| Agente de IA · health | `http://localhost:8081/health` |
-| Agente de IA · docs (FastAPI) | `http://localhost:8081/docs` |
-| Agente de IA · métricas | `http://localhost:8081/metrics` |
-| PostgreSQL | `localhost:5432` (db/usuario `smartbancs`) |
-| Grafana | `http://localhost:3333` (`admin`/`admin`, configurable) |
-| Prometheus | `http://localhost:9090` |
-| Tempo | `http://localhost:3200` |
-| Loki | `http://localhost:3100` |
-| postgres-exporter | `http://localhost:9187/metrics` |
-
-**5. Detén el stack:**
+**4. Comprueba la salud de los componentes clave:**
 
 ```bash
-docker compose down
+curl -s http://localhost:8080/actuator/health      # API (Spring Boot)
+curl -s http://localhost:8081/health               # Agente de IA (FastAPI)
+# Abre la documentación interactiva en el navegador:
+#  API   → http://localhost:8080/swagger-ui.html
+#  IA    → http://localhost:8081/docs
 ```
 
-Para borrar también los volúmenes de datos: `docker compose down -v`.
+**5. Flujo del reto, paso a paso (recorrido de demostración).** Con Swagger UI o
+`curl`, sigue este orden para cubrir lo exigido por el reto:
+
+1. **Cliente**: `POST /customers` → toma el `id`.
+2. **Cuenta**: `POST /accounts` (`customerId`, moneda, saldo inicial) → copia
+   `id` y `accountNumber`.
+3. **Depósito**: `POST /transactions` (`type=DEPOSIT`, `amount`, `currency`,
+   `idempotencyKey` única). Responde `201` **sin esperar a la IA** (no bloqueante).
+4. **Transferencia**: `POST /transactions` (débito → crédito) y reusa la misma
+   `idempotencyKey` para ver la idempotencia (misma transacción, no se duplica).
+5. **Ledger**: `GET /transactions/{id}/ledger` → dos legs DEBIT/CREDIT.
+6. **Recomendación IA (asíncrona)**: espera ~10–15 s (outbox + worker) y llama
+   `GET /recommendations?customerId={cliente}` → recomendación `READY` con
+   `category`, `message` (qué hacer, como lo haría la entidad bancaria),
+   `priority`, `insights` y `actions`.
+7. **ETL por lotes** (opcional): `POST /transactions/batch` (ver §10).
+8. **Observabilidad**: Grafana `http://localhost:3333` (`admin`/`admin`) →
+   dashboard **"SmartBancs – Observabilidad"**; métricas en `:9090`, trazas en
+   `:3200`, logs en `:3100`.
+9. **Evidencia reproducible**: `./scripts/demo.sh` (ver §11).
+
+**5.1 Puertos de la solución (servicios y observabilidad):**
+
+| Servicio | Puerto local |
+| --- | --- |
+| API (Spring Boot) · health `:8080/actuator/health` | `8080` |
+| Agente de IA (FastAPI) · health `:8081/health` | `8081` |
+| PostgreSQL (db/usuario `smartbancs`) | `5432` |
+| **Grafana** (dashboards + alertas) | `3333` |
+| **Prometheus** (métricas) | `9090` |
+| **Tempo** (trazas OTLP; también `4317`/`4318`) | `3200` |
+| **Loki** (logs) | `3100` |
+| postgres-exporter | `9187` |
+
+**5.2 Despliega en AWS (Terraform + EC2).** El mismo stack —las **imágenes
+ Docker** del repositorio— se despliega en **instancias EC2** de AWS con
+ **Terraform**; el security group expone la **API públicamente por el puerto
+ 8080** (IP pública/DNS de la instancia) para este reto mientras el resto de
+ servicios queda en la red interna. Requiere GitHub Actions con OIDC y el secret
+ `OPENROUTER_API_KEY`. Comandos y detalle en [`terraform/`](terraform), en el
+ workflow [`.github/workflows/terraform-ci.yml`](.github/workflows/terraform-ci.yml)
+ y en la sección *Despliegue en AWS* de
+ [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
+
+**6. Detén el stack:**
+
+```bash
+docker compose down            # apaga servicios
+docker compose down -v         # apaga y borra los volúmenes (datos)
+```
 
 > **Docker rootless (Linux).** Si `promtail` no encuentra el daemon, exporta las
 > rutas antes de `docker compose up`:

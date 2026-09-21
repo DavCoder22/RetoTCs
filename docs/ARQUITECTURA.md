@@ -249,7 +249,68 @@ con acciones inmediatas y preventivas documentadas.
 
 ---
 
-## 8. Estado de implementación (lo verificable en el repo)
+## 8. Despliegue en AWS (Terraform + EC2 + Docker)
+
+El repositorio incluye **Infraestructura como Código** con **Terraform**
+(`terraform/` — provider AWS, variables `region`/`profile`) y el workflow de CI
+[`.github/workflows/terraform-ci.yml`](../.github/workflows/terraform-ci.yml)
+que autentica **GitHub Actions contra AWS mediante OIDC** (sin credenciales
+estáticas en el repositorio).
+
+**Estrategia de despliegue:** el mismo stack del MVP local (construido por
+`docker compose`) se despliega en **instancias EC2** de AWS y la **API queda
+accesible públicamente** desde Internet.
+
+> Diagrama de despliegue (PlantUML): tercer bloque de
+> [`docs/arquitectura.puml`](arquitectura.puml). La vista Mermaid siguiente se
+> renderiza directamente en GitHub.
+
+```mermaid
+flowchart TB
+    USER["Usuario final / Cliente"] -->|"acceso público a la API (8080)"| SG["Security Group\n8080 API · 3333 Grafana · 22 SSH"]
+    SG --> EC2["EC2 · Amazon Linux 2023\nDocker Engine"]
+
+    subgraph EC2["docker compose up (imágenes Docker)"]
+        API["api :8080\n(Java 21 · Spring Boot)"]
+        AI["ai-service :8081\n(Python · FastAPI)"]
+        PG[("PostgreSQL :5432")]
+        OBS["Prometheus · Grafana :3333\nTempo · Loki · postgres-exporter"]
+    end
+
+    ECR["Amazon ECR\nimágenes del stack"] -. "docker pull" .-> EC2
+    GHA["GitHub Actions · OIDC\nterraform-ci.yml"] -->|"terraform apply\nprovisiona VPC · EC2 · SG"| EC2
+    GHA -. "docker build + push" .-> ECR
+```
+
+**Cómo se desplega (paso a paso):**
+
+1. **Imágenes Docker.** Se construyen las imágenes del stack (las mismas de los
+   `Dockerfile` del repositorio: `smartbancs-api`, `ai-service`, la
+   observabilidad) y se suben a **Amazon ECR**. *(En una primera pasada pueden
+   cargarse directamente en la instancia vía `docker save`/`load`.)*
+2. **Provisionamiento con Terraform.** `terraform apply` crea la **VPC** con
+   subred pública, **Internet Gateway**, **security groups** y las **instancias
+   EC2** (Amazon Linux 2023 con Docker Engine instalado).
+3. **Levantar el stack.** En cada EC2: `docker compose up` con las imágenes
+   (`pull` desde ECR). Postgres y la observabilidad dejan de exponerse;
+   permanecen internos dentro de la VPC.
+4. **Acceso público a la API.** El security group habilita **TCP/8080** a
+   Internet vía la **IP pública o DNS** asignados a la instancia. El resto de
+   puertos (Postgres, Tempo, Loki, Grafana por defecto) solo se alcanzan desde
+   la red interna. *(Mejora recomendada: ALB + TLS con ACM para producción.)*
+
+**¿Por qué EC2 + imágenes Docker?**
+
+- **Paridad total** entre el MVP local (`docker compose up`) y producción: son
+  las mismas imágenes, lo que elimina el clásico "en mi máquina sí funciona".
+- **Portabilidad** de la observabilidad embarcada: las 8 reglas de alerta SLO,
+  dashboards y datasources viajan con el despliegue.
+- **Gestión operativa simple** (docker compose + systemd) para un reto de
+  entrega, manteniendo la puerta abierta a kubernetes/ECS en el futuro.
+
+---
+
+## 9. Estado de implementación (lo verificable en el repo)
 
 | Componente | Estado | Dónde |
 | --- | --- | --- |

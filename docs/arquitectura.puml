@@ -75,3 +75,44 @@ ai --> wk : recomendación (mock avanzado / OpenRouter)
 wk -> db : guarda recomendación (tabla recommendations)
 
 @enduml
+
+@startuml smartbancs-despliegue-aws
+!theme plain
+title SmartBancs — Despliegue en AWS (Terraform · EC2 · Docker)
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam nodeFontSize 12
+skinparam defaultTextAlignment center
+
+actor "Usuario final / Cliente" as user
+
+cloud "AWS" {
+    node "VPC · subred pública\n(Internet Gateway)" as net {
+        node "Security Group\n8080 API · 3333 Grafana · 22 SSH" as sg
+        node "EC2 · Amazon Linux 2023\nDocker Engine · docker compose" as ec2 {
+            component "api :8080\n(Java 21 · Spring Boot)" as api
+            component "ai-service :8081\n(Python · FastAPI)" as ai
+            component "PostgreSQL :5432" as pg
+            component "Prometheus :9090 · Grafana :3333 · Tempo :3200\nLoki :3100 · postgres-exporter" as obs
+        }
+        node "Amazon ECR\nimágenes Docker del stack" as ecr
+    }
+}
+
+node "GitHub Actions\nworkflow terraform-ci.yml · OIDC" as gh
+
+user --> sg : "acceso público a la API\n(IP pública / DNS de la EC2)"
+sg --> api
+gh ..> ecr : "docker build + push\n(imágenes construidas desde docker-compose)"
+ecr ..> ec2 : "docker compose up\ndescarga imágenes de ECR"
+gh --> ec2 : "terraform apply · provisiona VPC, EC2, security groups"
+gh --> net
+
+note bottom of ec2
+  Mismas imágenes del MVP local:
+  el mismo "docker compose" del readme corre en AWS,
+  con la API expuesta públicamente (8080).
+end note
+
+@enduml
