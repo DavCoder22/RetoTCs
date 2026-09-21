@@ -283,10 +283,45 @@ docker compose down            # apaga servicios
 docker compose down -v         # apaga y borra los volúmenes (datos)
 ```
 
-> **Docker rootless (Linux).** Si `promtail` no encuentra el daemon, exporta las
-> rutas antes de `docker compose up`:
-> `DOCKER_SOCKET=/run/user/$UID/docker.sock` y
-> `DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers`.
+> **Docker rootless (Linux).** Dos ajustes posibles:
+>
+> **1. `promtail` no encuentra el daemon** (error `creating mount source path
+> '/var/lib/docker/containers'`): en rootless el socket y los contenedores no
+> están en las rutas por defecto. Exporta antes de `docker compose up`
+> (o ponlos en `.env`, está en `.gitignore`):
+>
+> ```bash
+> export DOCKER_SOCKET=/run/user/$UID/docker.sock
+> export DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers
+> ```
+> Verifica las rutas reales con `docker info | grep "Docker Root Dir"`.
+>
+> **2. Egreso de contenedores roto (timeouts a internet).** Síntoma: el agente
+> de IA cae a `source: "mock"` aun teniendo `OPENROUTER_API_KEY`, porque el
+> `httpx.ConnectTimeout` a OpenRouter nunca se resuelve. Ocurre con
+> **slirp4netns** (driver de red por defecto de rootless) en kernels recientes
+> (p. ej. 7.x). La solución es cambiar el driver rootless a **pasta**
+> (`passt`), soportado nativamente por rootlesskit ≥ 3.1:
+>
+> ```bash
+> sudo pacman -S passt          # Arch/Manjaro (en otras distros busca "passt")
+> ```
+>
+> ```ini
+> # ~/.config/systemd/user/docker.service.d/override.conf
+> [Service]
+> Environment="DOCKERD_ROOTLESS_ROOTLESSKIT_NET=pasta"
+> Environment="DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=implicit"
+> ```
+>
+> ```bash
+> systemctl --user daemon-reload && systemctl --user restart docker
+> ```
+>
+> Diagnóstico rápido: si un contenedor cualquiera puede resolver DNS pero todo
+> TCP externo muere (`docker run --rm python:3.12-alpine python -c "import
+> socket; socket.setdefaulttimeout(6); socket.create_connection(('1.1.1.1',
+> 443))"` → `TimeoutError`), es este problema y no del stack.
 
 ## 8. Agente de IA (recomendaciones)
 
