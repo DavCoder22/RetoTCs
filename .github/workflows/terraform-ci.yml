@@ -32,7 +32,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-          aud: sts.amazonaws.com
+          audience: sts.amazonaws.com
 
       - uses: hashicorp/setup-terraform@v3
         with:
