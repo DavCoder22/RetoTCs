@@ -64,7 +64,7 @@ instrumentado para observabilidad (métricas, logs, trazas y alertas).
   ┌───────────▼────────┐  ┌──────────────▼─────────────┐  ┌────────▼─────────────┐
   │  Bancs (legado)    │  │  ETL / Warehouse (etl/)    │  │  ai-service :8081    │
   │  outbox relayer +  │  │  limpieza + fact table     │  │  recomendaciones     │
-  │  reconciliación    │  │  para IA / análisis        │  │  (asíncrono, mock)   │
+  │  reconciliación    │  │  para IA / análisis        │  │  (Python/FastAPI)   │
   └────────────────────┘  └────────────────────────────┘  └──────────────────────┘
 
       Observabilidad (transversal): Micrometer → Prometheus · Tempo · Loki · Grafana
@@ -91,7 +91,7 @@ como exige el reto (stack tecnológico libre).
 | D5 | **Idempotencia por `idempotency_key` (columna única)** | Reintentos del cliente o del mensajero no duplican operaciones: requisito habitual en pagos y lo que permite reintentar sin miedo. |
 | D6 | **Patrón outbox** para integrar con Bancs | El core legado **no puede recibir tráfico alto y síncrono**. Las transacciones se confirman solo contra PostgreSQL (rápido), y un *relayer* entrega los eventos a Bancs en lotes controlados. Aísla SmartBancs de la disponibilidad de Bancs. |
 | D7 | **Reconciliación programada (batch nocturna / horaria)** | Si un evento de outbox no se entrega, la reconciliación de saldos detecta la desviación y la corrige. Da **consistencia eventual** garantizada sin necesitar síncrono. |
-| D8 | **IA como servicio separado y asíncrono (`ai-service`)** | El flujo de `/transactions` **nunca** espera a la IA. La generación de recomendaciones se dispara en segundo plano (stub devuelve 501 hasta integrar el proveedor); si la IA falla/va lenta, la transacción no se afecta. |
+| D8 | **IA como servicio separado y asíncrono (`ai-service`)** | El agente de IA es **independiente en Python/FastAPI** (antes Java): consume OpenRouter (opcional) y cae a un mock avanzado si no hay API key o el proveedor falla. El flujo de `/transactions` **nunca** espera a la IA; si la IA falla o va lenta, la transacción no se afecta. |
 | D9 | **Observabilidad con Micrometer → Prometheus/Tempo/Loki** | Instrumentación oficial de Spring Boot (sin agentes), visible en Grafana con dashboards y alertas por SLO. Cubre métricas, logs JSON con `traceId` y trazas OTLP. |
 | D10 | **Docker Compose como IaC del entorno** y **Terraform para AWS** | Un comando levanta BD + API + AI + observabilidad (entorno de desarrollo portable). Terraform prepara el despliegue en AWS con OIDC para CI. |
 | D11 | **Actuator + `build-info`** | Healthchecks con `curl` en los contenedores, `/actuator/health` detallado y versión de build visible en métricas/info → trazabilidad despliegue-incidente. |
@@ -223,7 +223,7 @@ con acciones inmediatas y preventivas documentadas.
 | IaC AWS (Terraform + OIDC) | ✅ Scaffolding | `terraform/` + `.github/workflows/terraform-ci.yml` |
 | Patrón outbox (tabla/repositorio) | ✅ Tabla/repo listos; relayer pendiente | `outbox_events`, `OutboxEventJpaRepository` |
 | ETL / transformación + fact table | ✅ Implementado | `etl/` + `POST /transactions/batch` |
-| Servicio de IA (mock separado, asíncrono) | 🟡 Stub funcional (501) | `ai-service` |
+| Agente de IA (Python/FastAPI, asíncrono, OpenRouter + mock) | ✅ Funcional y no bloqueante | `ai-service` |
 | Observabilidad (métricas/logs/trazas/alertas) | ✅ Implementado y verificado | `observability/` + `docs/OBSERVABILIDAD.md` |
 | Incidente simulado + post mortem | ✅ Documentado | `docs/INCIDENTE_Y_POST_MORTEM.md` |
 | Declaración de uso de IA | ✅ Documentado | `docs/DECLARACION_IA.md` |

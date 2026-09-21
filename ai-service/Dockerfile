@@ -1,13 +1,7 @@
-FROM maven:3.9.9-eclipse-temurin-21 AS build
+FROM python:3.12-slim
 WORKDIR /app
-COPY . .
-RUN mvn -B -ntp -pl ai-service -am clean package -DskipTests
-
-FROM eclipse-temurin:21-jre
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY --from=build /app/ai-service/target/ai-service-*.jar app.jar
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app ./app
 EXPOSE 8081
-ENTRYPOINT ["java", "-jar", "app.jar"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081"]

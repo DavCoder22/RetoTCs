@@ -8,8 +8,9 @@
 
 | Herramienta | Tipo | Uso |
 | --- | --- | --- |
-| **Claude / asistentes de código (opencode)** | Asistente de programación basado en LLM | Autocompletado, revisión de código, generación de código de ejemplo y documentación técnica |
-| **Documentación oficial de Spring Boot / Grafana / Prometheus** | Fuente de verdad | Validación de configuraciones (actuator, Micrometer, OpenTelemetry, alertas) |
+| **Big Pickle** (agente de codificación de **opencode**) | Asistente de programación basado en LLM | Generación de código, configuración e instrumentación (observabilidad → agente de IA); revisión y documentación |
+| **Agente de planificación de opencode** | Planificador | Diseño de la **estructura general del mock** (flujo transaccional y servicio de recomendaciones) |
+| **Documentación oficial de Spring Boot / FastAPI / Grafana / Prometheus** | Fuente de verdad | Validación de configuraciones (actuator, Micrometer, OpenTelemetry, alertas, endpoints) |
 | (Opcional) **Traductores/intérpretes automáticos** | Herramienta | Revisión gramatical de la documentación en español |
 
 > La lista anterior refleja lo declarado por el candidato. Si no se usó alguna
@@ -18,13 +19,17 @@
 
 ## Cómo se utilizó
 
-- **Asistencia en código (MVP)**: se generaron fragmentos de configuración
-  (p. ej. `application.yml`, `prometheus.yml`, reglas de alerta PromQL,
-  `logback-spring.xml`) que el candidato **revisó, validó contra la
-  documentación oficial y ajustó** según los requisitos del reto (10 000 tps,
-  latencia < 2 s, no saturar a Bancs).
+- **Asistencia en código (MVP)**: se generaron las funciones comprendidas
+  entre la **observabilidad** y la **sección del agente de IA** (que quedó en
+  **Python/FastAPI**): configuración de Spring Boot (actuator, tracing, logs
+  JSON), métricas de negocio (`TransactionMetrics`), métricas propias del
+  agente de IA (`smartbancs_ai_*`), reglas de alerta PromQL y archivos del
+  stack de observabilidad. El candidato **revisó, validó contra la
+  documentación oficial y ajustó** cada pieza según los requisitos del reto.
 - **Apoyo en diseño técnico**: se contrastaron patrones (outbox, doble partida,
   `SELECT … FOR UPDATE`, idempotencia) con buenas prácticas conocidas.
+- **Estructura del mock**: la organización general del mock (transaccional y del
+  agente de IA) se diseñó con el **agente de planificación de opencode**.
 - **Redacción de documentación**: los documentos técnicos se redactaron con
   apoyo del asistente y fueron **revisados y corregidos por el candidato**
   (arquitectura, decisiones, post mortem, observabilidad).
@@ -33,9 +38,12 @@
 
 1. **Código del MVP**: configuración de Spring Boot (actuator, tracing, logs
    JSON), métricas de negocio (`TransactionMetrics`), reglas de alerta de
-   Prometheus y archivos del stack de observabilidad. Todo el código fue
-   compilado (`./mvnw clean package`) y el stack ejecutado y verificado
-   (`docker compose up`), incluidas las alertas.
+   Prometheus, archivos del stack de observabilidad y el **agente de IA en
+   Python/FastAPI** (endpoints asíncronos, proveedor OpenRouter con fallback a
+   mock avanzado y métricas `smartbancs_ai_*`). Todo se compiló/ejecutó
+   (`./mvnw clean package` y `docker compose up`) y se verificó de punta a
+   punta: transacción → métrica → alerta, logs con `traceId` y traza en Tempo,
+   y petición al agente de IA con sus métricas scrapedas por Prometheus.
 2. **Docencia y evidencia**: documentación en `docs/` (ARQUITECTURA,
    OBSERVABILIDAD, INCIDENTE_Y_POST_MORTEM, GUIA_DEMO_SWAGGER), README en
    español, scripts de demo y evidencia de funcionamiento.

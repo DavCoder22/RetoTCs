@@ -61,3 +61,9 @@ crash.log
 
 # ETL artifacts (generated outputs; raw sample data IS tracked)
 etl/output/
+
+# Python AI service
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

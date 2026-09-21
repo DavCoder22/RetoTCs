@@ -35,15 +35,18 @@ public class TransactionService {
     private final AccountJpaRepository accountRepository;
     private final LedgerEntryJpaRepository ledgerEntryRepository;
     private final TransactionMetrics metrics;
+    private final RecommendationService recommendationService;
 
     public TransactionService(TransactionJpaRepository transactionRepository,
                               AccountJpaRepository accountRepository,
                               LedgerEntryJpaRepository ledgerEntryRepository,
-                              TransactionMetrics metrics) {
+                              TransactionMetrics metrics,
+                              RecommendationService recommendationService) {
         this.transactionRepository = transactionRepository;
         this.accountRepository = accountRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
         this.metrics = metrics;
+        this.recommendationService = recommendationService;
     }
 
     @Transactional(readOnly = true)
@@ -112,6 +115,7 @@ public class TransactionService {
             };
             TransactionResponse response = toResponse(saved.toDomain());
             metrics.recordSuccess(type, response.amount(), startNanos);
+            recommendationService.publishRequest(saved);
             return response;
         } catch (RuntimeException ex) {
             metrics.recordFailure(type, amount, startNanos);

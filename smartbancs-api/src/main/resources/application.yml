@@ -4,6 +4,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  task:
+    scheduling:
+      pool:
+        size: 2
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/smartbancs}
     username: ${SPRING_DATASOURCE_USERNAME:smartbancs}
@@ -51,3 +55,13 @@ management:
   otlp:
     tracing:
       endpoint: ${OTLP_TRACING_ENDPOINT:http://localhost:4318/v1/traces}
+
+smartbancs:
+  ai:
+    base-url: ${AI_SERVICE_URL:http://localhost:8081}
+    timeout-ms: ${AI_HTTP_TIMEOUT_MS:30000}
+    worker:
+      batch-size: 10
+      delay-ms: ${AI_WORKER_DELAY_MS:3000}
+      initial-delay-ms: ${AI_WORKER_INITIAL_DELAY_MS:10000}
+      max-attempts: ${AI_WORKER_MAX_ATTEMPTS:3}

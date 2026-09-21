@@ -17,7 +17,6 @@
         <module>smartbancs-domain</module>
         <module>smartbancs-infra</module>
         <module>smartbancs-api</module>
-        <module>ai-service</module>
     </modules>
 
     <properties>

@@ -2,9 +2,10 @@
 
 > Implementación del entregable **Observability (metrics, logs, traces)** del
 > reto. El stack se levanta con el mismo `docker compose` y no requiere
-> agentes externos: las dos aplicaciones (API y AI service) se auto-instrumentan
-> con **Micrometer** (Spring Boot) y exportan a **Prometheus**, **Tempo** y
-> **Loki**, todo visible en **Grafana**.
+> agentes externos: la **API** (`smartbancs-api`, Spring Boot) se auto-instrumenta
+> con **Micrometer** y exporta a **Prometheus**, **Tempo** y **Loki**; el
+> **agente de IA** (`ai-service`, Python/FastAPI) expone sus propias métricas en
+> `/metrics`.
 
 ## Arquitectura e integración
 
@@ -13,7 +14,7 @@
                         │                    smartbancs                      │
    Navegador/ops ------ │  │  api:8080 │  ai-service:8081                 │
                         │  │   │  │     │      │                          │
-                        │  │  /actuator/prometheus                        │
+                        │  │  (API) /actuator/prometheus · (IA) /metrics   │
                         │  │  OTLP HTTP (trazas)  ──► tempo:4318 ──► Tempo│
                         │  │  JSON logs (stdout)  ──► promtail ──► Loki    │
                         │  └──────────────────────────────────────────────┘
@@ -27,7 +28,7 @@ Las piezas nuevas se agrupan en la carpeta **`observability/`**:
 
 | Servicio | Imagen | Puerto host | Rol |
 | --- | --- | --- | --- |
-| `prometheus` | `prom/prometheus:v2.53.1` | `9090` | Almacena y consulta métricas (scraping de `/actuator/prometheus`) |
+| `prometheus` | `prom/prometheus:v2.53.1` | `9090` | Almacena y consulta métricas (scraping de `/actuator/prometheus` y `/metrics`) |
 | `tempo` | `grafana/tempo:2.6.1` | `3200` (UI/API), `4317` gRPC, `4318` HTTP | Receptor **OTLP** y almacén de traces |
 | `loki` | `grafana/loki:3.3.2` | `3100` | Almacén de logs (retention 7 días) |
 | `promtail` | `grafana/promtail:3.3.2` | — (interno) | Descubre contenedores `smartbancs-*` y envía sus logs JSON a Loki |
@@ -39,10 +40,14 @@ Grafana se provisiona automáticamente (datasources + dashboard) desde
 
 ## Instrumentación de las aplicaciones
 
-Ambos servicios (`smartbancs-api` y `ai-service`) llevan la misma
-instrumentación estándar de Spring Boot 3 + Micrometer:
+La instrumentación descrita corresponde a `smartbancs-api` (Spring Boot 3 +
+Micrometer). El **agente de IA** (`ai-service`) quedó en **Python/FastAPI**:
+expone `GET /health`, `GET /docs` y `GET /metrics`, con métricas propias
+`smartbancs_ai_*` (peticiones, recomendaciones por fuente/categoría, errores de
+validación, latencia). Las trazas OTLP actuales provienen de la API (incluida
+la llamada API → IA dentro de su trace):
 
-1. **Dependencias** (en los POM de `smartbancs-api` y `ai-service`):
+1. **Dependencias** (en los POM de `smartbancs-api`):
    - `micrometer-registry-prometheus` — expone `/actuator/prometheus`.
    - `micrometer-tracing-bridge-otel` + `opentelemetry-exporter-otlp` — trazas
      OTLP a Tempo.
@@ -106,7 +111,7 @@ docker compose up --build -d
 | Loki | http://localhost:3100 | — |
 | Métricas de PostgreSQL | http://localhost:9187/metrics | — |
 | Métricas API | http://localhost:8080/actuator/prometheus | — |
-| Métricas AI service | http://localhost:8081/actuator/prometheus | — |
+| Métricas AI service | http://localhost:8081/metrics | — |
 | Alertas (Prometheus rules) | http://localhost:9090/rules | — |
 
 Si `3333` está ocupado, cambia `GRAFANA_HOST_PORT` (`.env`): el puerto host de
