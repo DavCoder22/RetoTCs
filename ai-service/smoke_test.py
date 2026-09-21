@@ -20,6 +20,8 @@ CONTEXT = {
     "context": {
         "transactionId": "00000000-0000-0000-0000-000000000010",
         "customerId": "c0000000-0000-0000-0000-000000000001",
+        "customerSegment": "RETAIL",
+        "accountAgeDays": 730,
         "type": "DEPOSIT",
         "amount": 500.00,
         "currency": "PEN",
@@ -37,10 +39,14 @@ REQUIRED = {
     "message",
     "priority",
     "insights",
+    "actions",
     "model",
     "source",
     "generatedAt",
 }
+
+CATEGORIES = {"savings", "spending", "transfer", "risk", "generic"}
+PRIORITIES = {"LOW", "MEDIUM", "HIGH"}
 
 
 def main() -> int:
@@ -61,11 +67,17 @@ def main() -> int:
     if missing:
         print(f"FAIL schema: {sorted(missing)}")
         return 1
-    if body["priority"] not in ("LOW", "MEDIUM", "HIGH"):
+    if body["category"] not in CATEGORIES:
+        print(f"FAIL category={body['category']!r}")
+        return 1
+    if body["priority"] not in PRIORITIES:
         print(f"FAIL priority={body['priority']!r}")
         return 1
     if not body["message"]:
         print("FAIL message vacío")
+        return 1
+    if not body["actions"] or len(body["actions"]) > 5:
+        print(f"FAIL actions inválidas: {body['actions']!r}")
         return 1
     if body["source"] != EXPECTED_SOURCE:
         print(f"FAIL source={body['source']!r} esperado={EXPECTED_SOURCE!r}")

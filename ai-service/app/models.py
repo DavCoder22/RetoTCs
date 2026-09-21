@@ -9,9 +9,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer, field_validator
 from pydantic.alias_generators import to_camel
 
 CAMEL_ALIASES = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -24,6 +24,8 @@ class TxnContext(BaseModel):
 
     transaction_id: Optional[uuid.UUID] = Field(default=None, description="Id de la transacción asentada")
     customer_id: uuid.UUID = Field(description="Cliente (cédula lógica) asociado a la operación")
+    customer_segment: Optional[str] = Field(default=None, description="RETAIL | PREMIUM | CORPORATE (info general del cliente)")
+    account_age_days: Optional[int] = Field(default=None, ge=0, description="Antigüedad de la cuenta primaria en días")
     type: str = Field(description="DEPOSIT | WITHDRAWAL | TRANSFER | PAYMENT")
     amount: Decimal = Field(gt=0, description="Monto en la moneda de la cuenta")
     currency: str = Field(min_length=3, max_length=3, description="ISO-4217 (PEN/USD)")
@@ -51,16 +53,24 @@ class AiRecommendationRequest(BaseModel):
 
 
 class AiRecommendationResponse(BaseModel):
-    """Recomendación generada por el agente (DTO de salida)."""
+    """Recomendación generada por el agente (DTO de salida estandarizado)."""
 
     model_config = CAMEL_ALIASES
 
     recommendation_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     customer_id: uuid.UUID
-    category: str = Field(description="Categoría de la recomendación, p. ej. savings | risk | transfer | generic")
-    message: str = Field(description="Texto legible para el cliente")
+    category: str = Field(
+        description="Categoría normalizada: savings | spending | transfer | risk | generic",
+        pattern="^(savings|spending|transfer|risk|generic)$",
+    )
+    message: str = Field(min_length=1, max_length=400, description="Qué hacer, como lo diría la entidad bancaria")
     priority: str = Field(description="LOW | MEDIUM | HIGH", pattern="^(LOW|MEDIUM|HIGH)$")
-    insights: list[str] = Field(default_factory=list, description="Razonamiento corto de apoyo")
+    insights: list[Annotated[str, StringConstraints(max_length=120)]] = Field(
+        default_factory=list, max_length=10, description="Razonamiento corto de apoyo"
+    )
+    actions: list[Annotated[str, StringConstraints(max_length=120)]] = Field(
+        default_factory=list, max_length=5, description="Acciones concretas sugeridas para el cliente"
+    )
     model: str = Field(description="Modelo que generó la recomendación (proveedor) o 'mock'")
     source: str = Field(default="mock", description="openrouter | mock")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

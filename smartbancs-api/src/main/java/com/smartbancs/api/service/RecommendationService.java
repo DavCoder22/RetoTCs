@@ -12,6 +12,7 @@ import com.smartbancs.infra.persistence.OutboxEventEntity;
 import com.smartbancs.infra.persistence.RecommendationEntity;
 import com.smartbancs.infra.persistence.TransactionEntity;
 import com.smartbancs.infra.repository.AccountJpaRepository;
+import com.smartbancs.infra.repository.CustomerJpaRepository;
 import com.smartbancs.infra.repository.OutboxEventJpaRepository;
 import com.smartbancs.infra.repository.RecommendationJpaRepository;
 import org.slf4j.Logger;
@@ -32,17 +33,20 @@ public class RecommendationService {
 
     private final OutboxEventJpaRepository outboxRepository;
     private final AccountJpaRepository accountRepository;
+    private final CustomerJpaRepository customerRepository;
     private final RecommendationJpaRepository recommendationRepository;
     private final ObjectMapper objectMapper;
     private final AiGateway ai;
 
     public RecommendationService(OutboxEventJpaRepository outboxRepository,
                                  AccountJpaRepository accountRepository,
+                                 CustomerJpaRepository customerRepository,
                                  RecommendationJpaRepository recommendationRepository,
                                  ObjectMapper objectMapper,
                                  AiGateway ai) {
         this.outboxRepository = outboxRepository;
         this.accountRepository = accountRepository;
+        this.customerRepository = customerRepository;
         this.recommendationRepository = recommendationRepository;
         this.objectMapper = objectMapper;
         this.ai = ai;
@@ -86,9 +90,21 @@ public class RecommendationService {
         var credit = saved.getCreditAccountId() != null ? byId.get(saved.getCreditAccountId()) : null;
         UUID customerId = debit != null ? debit.getCustomerId()
                 : (credit != null ? credit.getCustomerId() : null);
+        String segment = null;
+        if (customerId != null) {
+            var customer = customerRepository.findById(customerId).orElse(null);
+            segment = customer != null && customer.getSegment() != null ? customer.getSegment().name() : null;
+        }
+        var primary = debit != null ? debit : credit;
+        Long accountAgeDays = null;
+        if (primary != null && primary.getCreatedAt() != null) {
+            accountAgeDays = Math.max(0, java.time.Duration.between(primary.getCreatedAt(), Instant.now()).toDays());
+        }
         return new AiRecommendationContext(
                 saved.getId(),
                 customerId,
+                segment,
+                accountAgeDays,
                 saved.getType().name(),
                 saved.getAmount(),
                 saved.getCurrency(),

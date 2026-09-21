@@ -1,9 +1,15 @@
-"""Proveedores de generación de recomendaciones.
+"""Proveedores de generación de recomendaciones (contrato estandarizado).
 
 - OpenRouterProvider: llama al modelo real (por defecto moonshotai/kimi-k2.6) de
   forma **asíncrona** (httpx.AsyncClient) para no bloquear el event loop.
 - MockProvider: avanzado y funcional, determinista (heurística sobre el DTO) para
   que la demo/tests funcionen sin red ni API key.
+
+Ambos proveedores pasan por `_to_response`, que **normaliza** la salida contra el
+contrato estandarizado: la API siempre contesta el mismo esquema con `category`
+∈ {savings, spending, transfer, risk, generic}, `priority` ∈ {LOW, MEDIUM, HIGH},
+`message` no vacío, `insights` ≤ 10 y `actions` 1..5 — sea la respuesta real del
+modelo o el mock. Así el consumo de la API es óptimo y predecible.
 """
 from __future__ import annotations
 
@@ -19,48 +25,104 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 BIG_THRESHOLD_USD = Decimal("2500")
+CATEGORIES = {"savings", "spending", "transfer", "risk", "generic"}
+PRIORITIES = {"LOW", "MEDIUM", "HIGH"}
+SEGMENT_SAVINGS_TARGET = {"RETAIL": "20000", "PREMIUM": "60000", "CORPORATE": "200000"}  # usado por el mock
 
 SYSTEM_PROMPT = (
-    "You are SmartBancs, the financial assistant. You receive a JSON transaction "
-    "context (a DTO) and must decide a personalized recommendation for the customer. "
-    "Respond ONLY with a single JSON object matching this schema (no markdown): "
-    '{"category": string, "message": string, "priority": "LOW"|"MEDIUM"|"HIGH", '
-    '"insights": [string, ...]}. '
-    "Consider the transaction type, amount, currency and balances to give useful, "
-    "specific and risk-aware advice for a Peruvian customer (PEN/USD)."
+    "You are SmartBancs, the AI of a bank advising its customer with the next best "
+    "action. You receive a JSON transaction context (a DTO) that includes the "
+    "customer's general information (customerSegment, accountAgeDays) plus the "
+    "movement data (type, amount, currency, balances after the operation). Decide "
+    "what the customer should do, as the bank would. "
+    "Respond ONLY with a single JSON object (no markdown, no extra text) matching "
+    "exactly this schema: "
+    '{"category": "savings|spending|transfer|risk|generic", '
+    '"message": string, "priority": "LOW|MEDIUM|HIGH", '
+    '"insights": [string, ...], "actions": [string, ...]}. '
+    "Rules: message in Spanish, concise, specific and risk-aware for a Peruvian "
+    "customer (PEN/USD). category: savings for incoming money, spending for small "
+    "outflows, risk for large or unusual outflows, transfer for P2P movements, "
+    "generic otherwise. insights: up to 4 short reasons. actions: 2-4 concrete "
+    "recommended actions."
 )
 
 
-def _mock_decision(context: TxnContext) -> dict:
-    amount = context.amount
-    high_amount = amount >= BIG_THRESHOLD_USD if context.currency == "USD" else amount >= BIG_THRESHOLD_USD * Decimal("3.75")
-    if context.type in ("WITHDRAWAL", "PAYMENT"):
-        return {
-            "category": "spending",
-            "priority": "HIGH" if high_amount else "MEDIUM",
-            "message": f"Detectamos un {_spanish_type(context.type)} de {amount:,.2f} {context.currency}. "
-                       f"Revisa tus notificaciones en tiempo real para verificar que fuiste tú.",
-            "insights": [f"Move of {amount} {context.currency}; verify with 2FA", "Suggested: enable instant alerts"],
-        }
-    if context.type == "TRANSFER":
-        return {
-            "category": "transfer",
-            "priority": "LOW",
-            "message": f"Transferencia de {amount:,.2f} {context.currency} registrada. "
-                       f"Puedes programar un ahorro automático del 5% para llegar a meta.",
-            "insights": ["P2P movement", "Saving suggestion: 5% autosave"],
-        }
-    return {
-        "category": "savings",
-        "priority": "MEDIUM",
-        "message": f"Abonaste {amount:,.2f} {context.currency}. Conserva el hábito: "
-                   f"estás a 18% de tu meta dormir tranquilo con un colchón de emergencia.",
-        "insights": ["Incoming credit", "Emergency-fund progress +18%"],
-    }
-
-
 def _spanish_type(tx_type: str) -> str:
-    return {"WITHDRAWAL": "retiro", "PAYMENT": "pago", "TRANSFER": "transferencia", "DEPOSIT": "abono"}.get(tx_type, tx_type.lower())
+    return {"WITHDRAWAL": "retiro", "PAYMENT": "pago", "TRANSFER": "transferencia", "DEPOSIT": "abono"}.get(
+        tx_type, tx_type.lower()
+    )
+
+
+def _mock_decision(context: TxnContext) -> dict:
+    """Decisión determinista usando información general del cliente (segmento y
+    antigüedad de cuenta) además del movimiento: cantidad, moneda y saldos."""
+    amount = context.amount
+    segment = (context.customer_segment or "RETAIL").upper()
+    age_days = context.account_age_days if context.account_age_days is not None else 365
+    target = SEGMENT_SAVINGS_TARGET.get(segment, SEGMENT_SAVINGS_TARGET["RETAIL"])
+    high_threshold = BIG_THRESHOLD_USD if context.currency == "USD" else BIG_THRESHOLD_USD * Decimal("3.75")
+    is_high = amount >= high_threshold
+    is_new = age_days < 90
+    profile = [
+        f"Customer segment: {segment}",
+        f"Account age: {age_days} days",
+    ]
+    if is_new:
+        profile.append("New account: strengthen adoption")
+
+    if context.type in ("WITHDRAWAL", "PAYMENT"):
+        category = "risk" if is_high else "spending"
+        priority = "HIGH" if is_high else "MEDIUM"
+        message = (
+            f"Detectamos un {_spanish_type(context.type)} de {amount:,.2f} {context.currency}."
+            f"{' Es un monto alto: verifica que fuiste tú antes de continuar.' if is_high else ''} "
+            f"Revisa tus notificaciones en tiempo real para confirmar la operación."
+        )
+        insights = [f"Outflow of {amount} {context.currency}", *profile[:2]]
+        if is_high:
+            insights.append("Amount above bank threshold; verify with 2FA")
+        actions = [
+            "Activar alertas de seguridad en tiempo real",
+            "Confirmar operaciones con token/huella",
+            "Revisar el estado de cuenta semanalmente",
+        ]
+    elif context.type == "TRANSFER":
+        category = "transfer"
+        priority = "MEDIUM" if is_high else "LOW"
+        message = (
+            f"Transferencia de {amount:,.2f} {context.currency} registrada. "
+            f"Puedes programar un ahorro automático del 5% para llegar a tu meta."
+        )
+        insights = ["P2P movement", *profile[:2]]
+        if is_high:
+            insights.append("P2P amount above usual range; confirm beneficiary")
+        actions = [
+            "Programar ahorro automático del 5%",
+            "Verificar que los beneficiarios registrados son conocidos",
+        ]
+    else:  # DEPOSIT (y cualquier entrada de dinero)
+        category = "risk" if segment in ("PREMIUM", "CORPORATE") and is_high else "savings"
+        priority = "MEDIUM"
+        message = (
+            f"Abonaste {amount:,.2f} {context.currency}. "
+            f"Conserva el hábito: estás cerca de tu meta de ahorro colchón de emergencia."
+        )
+        insights = ["Incoming credit", f"Emergency-fund target: {target} {context.currency}", *profile[:1]]
+        actions = [
+            f"Destinar el 20% al fondo de emergencia (meta {target} {context.currency})",
+            "Configurar una transferencia automática a la cuenta de ahorro",
+        ]
+        if segment in ("PREMIUM", "CORPORATE"):
+            actions.append("Revisar alternativas de inversión: plazo fijo o fondos mutuos")
+
+    return {
+        "category": category,
+        "priority": priority,
+        "message": message,
+        "insights": insights,
+        "actions": actions,
+    }
 
 
 def _extract_json(text: str) -> dict:
@@ -69,6 +131,31 @@ def _extract_json(text: str) -> dict:
     if start >= 0 and end > start:
         snippet = snippet[start:end + 1]
     return json.loads(snippet)
+
+
+def _normalize(data: dict) -> dict:
+    """Aplica el contrato estandarizado a cualquier salida (modelo o mock)."""
+    category = str(data.get("category", "generic")).strip().lower().replace(" ", "_")
+    if category not in CATEGORIES:
+        category = "generic"
+    priority = str(data.get("priority", "MEDIUM")).strip().upper()
+    if priority not in PRIORITIES:
+        priority = "MEDIUM"
+    message = str(data.get("message", "")).strip()
+    if not message:
+        message = "Revisa tu estado financiero; contáctanos si necesitas ayuda personalizada."
+    message = message[:400]
+    insights = [str(i).strip()[:120] for i in data.get("insights", []) if str(i).strip()]
+    actions = [str(a).strip()[:120] for a in data.get("actions", []) if str(a).strip()]
+    if not actions:
+        actions = ["Revisar el estado de la cuenta", "Configurar alertas de notificación"]
+    return {
+        "category": category,
+        "priority": priority,
+        "message": message,
+        "insights": insights[:10],
+        "actions": actions[:5],
+    }
 
 
 class Options:
@@ -110,7 +197,7 @@ class RecommendationProvider:
         payload = request.context.model_dump_json()
         body = {
             "model": self._options.model,
-            "temperature": 0.3,
+            "temperature": 0.2,
             "stream": False,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -128,12 +215,14 @@ class RecommendationProvider:
 
     @staticmethod
     def _to_response(request: AiRecommendationRequest, data: dict, source: str, model: str) -> AiRecommendationResponse:
+        normalized = _normalize(data)
         return AiRecommendationResponse(
             customer_id=request.context.customer_id,
-            category=str(data.get("category", "generic"))[:50],
-            message=str(data.get("message", "")),
-            priority=str(data.get("priority", "MEDIUM")).upper(),
-            insights=[str(i) for i in data.get("insights", [])][:10],
+            category=normalized["category"],
+            message=normalized["message"],
+            priority=normalized["priority"],
+            insights=normalized["insights"],
+            actions=normalized["actions"],
             model=model,
             source=source,
         )

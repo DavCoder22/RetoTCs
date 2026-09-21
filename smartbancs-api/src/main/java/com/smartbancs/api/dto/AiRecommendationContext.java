@@ -11,6 +11,10 @@ public record AiRecommendationContext(
         UUID transactionId,
         @Schema(description = "Cliente asociado a la operación (cuenta débito, si no, crédito).")
         UUID customerId,
+        @Schema(example = "RETAIL", description = "Segmento del cliente: RETAIL | PREMIUM | CORPORATE.")
+        String customerSegment,
+        @Schema(description = "Antigüedad de la cuenta primaria en días (info general del cliente).")
+        Long accountAgeDays,
         @Schema(description = "DEPOSIT | WITHDRAWAL | TRANSFER | PAYMENT.")
         String type,
         @Schema(example = "2500.00", description = "Monto en la moneda de la cuenta.")
