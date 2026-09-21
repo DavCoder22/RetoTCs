@@ -55,14 +55,10 @@ demostrativo y declaración de uso de IA.
 
 ## 2. Video demostrativo
 
-<!-- Pega aquí el enlace (URL) del video demostrativo de la solución -->
+<!-- Video demostrativo de la solución (enlace de Drive) -->
 | Formato | Enlace |
 | --- | --- |
-| Video demostrativo | [▶ Ver el video](https://PEGAR-ENLACE-DEL-VIDEO-AQUI) |
-
-**Instrucciones:** edita `README.md`, reemplaza `https://PEGAR-ENLACE-DEL-VIDEO-AQUI`
-por el enlace público del video (YouTube, Drive, Stream…) y, si quieres, añade
-una descripción del recorrido grabado.
+| Video demostrativo | [Video demostrativo](https://drive.google.com/drive/folders/1jb0co0URvDmLIChGstfGOVCwTHJL7wLt?usp=sharing) |
 
 > Sugerencia de contenido (3–5 min): CRUD de clientes/cuentas → depósito →
 > transferencia con idempotencia → ledger e invariante contable → observabilidad
@@ -85,7 +81,7 @@ una descripción del recorrido grabado.
 | Agente de IA asíncrono (no bloqueante) | 🟡 Funcional (mock + OpenRouter) |
 | Observabilidad (métricas · logs · trazas · alertas) | ✅ Hecho |
 | Documentación final + evidencia | ✅ Hecho |
-| Video demostrativo | 🟡 Pendiente de publicar enlace (§2) |
+| Video demostrativo | ✅ Publicado en la nube (enlace en §2) |
 
 ## 4. Stack tecnológico
 
@@ -487,7 +483,7 @@ El núcleo de negocio se organiza por **contextos acotados**:
 | MVP ejecutable | Repositorio Git · `docker compose up --build -d` | ✅ Listo |
 | Instrucciones | Este README · guía en [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | ✅ Listo |
 | Evidencia de funcionamiento | `scripts/` (`./scripts/demo.sh`) y capturas del stack | ✅ Listo |
-| Video demostrativo | [Enlace en §2](#2-video-demostrativo) | 🟡 Pendiente de publicar |
+| Video demostrativo | [Enlace en §2](#2-video-demostrativo) | ✅ Listo |
 | Observabilidad y alertas | [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | ✅ Listo |
 | Declaración de uso de IA | [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | ✅ Listo |
 
