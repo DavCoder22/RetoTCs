@@ -40,6 +40,44 @@ instrumentado para observabilidad (métricas, logs, trazas y alertas).
 
 ## 3. Arquitectura propuesta
 
+> **Diagrama de arquitectura (render profesional):** versión **PlantUML**
+> descargable en [`docs/arquitectura.puml`](arquitectura.puml) (vista de
+> componentes + secuencia de la transferencia). La versión Mermaid siguiente se
+> renderiza directamente en GitHub/GitLab; debajo se mantiene el esquema ASCII.
+
+```mermaid
+flowchart LR
+    U["Cliente / Core-banking"] -->|"POST /transactions"| API
+    B["ETL · lote CSV"] -->|"POST /transactions/batch"| API
+
+    subgraph Backend["Backend SmartBancs"]
+        API["smartbancs-api :8080<br/>(REST · Java 21 · virtual threads)"]
+        DOM["smartbancs-domain<br/>(reglas de negocio · Java puro)"]
+        INF["smartbancs-infra<br/>(Spring Data JPA · Flyway)"]
+        API --> DOM --> INF
+        INF --> PG[("PostgreSQL 16<br/>accounts · ledger · outbox_events")]
+        INF -->|"outbox · lotes con throttling · idempotente · reconciliación"| BANCS["Bancs · core legado"]
+    end
+
+    subgraph IA["Agente de IA (no bloqueante)"]
+        WR["RecommendationWorker<br/>(asíncrono)"]
+        AI["ai-service :8081<br/>(Python 3.12 · FastAPI · OpenRouter + mock)"]
+        WR --> AI
+    end
+    API -.-> WR
+
+    subgraph OBS["Observabilidad (GRAFLO)"]
+        P["Prometheus :9090"]
+        T["Tempo :3200"]
+        L["Loki :3100"]
+        G["Grafana :3333"]
+    end
+    API --> P --> G
+    API --> T --> G
+    API --> L --> G
+    AI --> P
+```
+
 ```
                         ┌────────────────────  capa presentación  ────────────────────┐
   Clientes / Core-banking│   smartbancs-api :8080                                     │

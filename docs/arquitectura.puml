@@ -1,0 +1,77 @@
+@startuml smartbancs-arquitectura-componentes
+!theme plain
+title SmartBancs — Vista de componentes y flujos
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam nodeFontSize 12
+skinparam defaultTextAlignment center
+
+actor "Cliente / Core-banking" as client
+actor "ETL · lote CSV (no homologado)" as etl
+
+package "Backend SmartBancs (Java 21 · Spring Boot 3)" {
+    component "smartbancs-api :8080\nREST · virtual threads · validación" as api
+    component "smartbancs-domain\nreglas de negocio (Java puro)" as dom
+    component "smartbancs-infra\nSpring Data JPA · Flyway" as inf
+    component "RecommendationWorker\nworker asíncrono (outbox)" as worker
+    database "PostgreSQL 16\naccounts · ledger · outbox_events" as db
+}
+
+package "Integración con el core legado" {
+    component "Bancs\ncore bancario legado" as bancs
+    component "ETL → fact table\nanalítica / modelos de IA" as etlout
+}
+
+package "Agente de IA (no bloqueante)" {
+    component "ai-service :8081\nPython 3.12 · FastAPI\nOpenRouter + mock avanzado" as ai
+}
+
+package "Observabilidad (GRAFLO)" {
+    component "Prometheus :9090" as prom
+    component "Tempo (OTLP) :3200" as tempo
+    component "Loki · Promtail :3100" as loki
+    component "Grafana :3333" as grafana
+}
+
+client --> api : "POST /transactions"
+etl --> api : "POST /transactions/batch"
+api --> dom
+dom --> inf
+inf --> db
+inf --> bancs : "patrón outbox · lotes con throttling\nidempotente · reconciliación programada"
+api ..> worker : "dispara recomendación (async, nunca bloquea)"
+worker ..> ai : "POST /internal/recommendations"
+etl --> etlout : "transforma (ISO-4217, fechas, montos) + carga"
+
+api --> prom : "/actuator/prometheus"
+api --> tempo : "OTLP /v1/traces"
+api --> loki : "logs JSON con traceId"
+ai --> prom : "/metrics (smartbancs_ai_*)"
+prom --> grafana
+tempo --> grafana
+loki --> grafana
+
+@enduml
+
+@startuml smartbancs-secuencia-transferencia
+!theme plain
+title SmartBancs — Secuencia de una transferencia (< 2 s) con IA no bloqueante
+
+actor "Cliente" as c
+participant "smartbancs-api" as api
+participant "smartbancs-infra (JPA)" as inf
+database "PostgreSQL" as db
+participant "RecommendationWorker" as wk
+participant "ai-service (Python/FastAPI)" as ai
+
+c -> api : POST /transactions (TRANSFER, idempotencyKey)
+api -> inf : valida + bloquea filas (FOR UPDATE) + chequea saldo
+inf -> db : INSERT transaction + ledger + outbox_events\nen una sola transacción ACID
+api --> c : 201 · < 2 s (sin esperar a la IA)
+api ->> wk : genera recomendación (asíncrono)
+wk -> ai : POST /internal/recommendations\n(contexto transaccional)
+ai --> wk : recomendación (mock avanzado / OpenRouter)
+wk -> db : guarda recomendación (tabla recommendations)
+
+@enduml

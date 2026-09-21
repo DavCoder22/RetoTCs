@@ -13,20 +13,22 @@ flujo transaccional principal.
 ## Índice
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
-2. [Estado del entregable](#2-estado-del-entregable)
-3. [Stack tecnológico](#3-stack-tecnológico)
-4. [Arquitectura](#4-arquitectura)
-5. [Estructura del repositorio](#5-estructura-del-repositorio)
-6. [Puesta en marcha (MVP con Docker)](#6-puesta-en-marcha-mvp-con-docker)
-7. [Agente de IA (recomendaciones)](#7-agente-de-ia-recomendaciones)
-8. [Observabilidad](#8-observabilidad)
-9. [ETL / carga a data warehouse](#9-etl--carga-a-data-warehouse)
-10. [Demo y evidencia](#10-demo-y-evidencia)
-11. [Ejecución sin Docker (desarrollo)](#11-ejecución-sin-docker-desarrollo)
-12. [Documentación técnica](#12-documentación-técnica)
-13. [Modelo de dominio](#13-modelo-de-dominio)
-14. [Flujo de trabajo Git](#14-flujo-de-trabajo-git)
-15. [Licencia y autor](#15-licencia-y-autor)
+2. [Video demostrativo](#2-video-demostrativo)
+3. [Estado del entregable](#3-estado-del-entregable)
+4. [Stack tecnológico](#4-stack-tecnológico)
+5. [Arquitectura](#5-arquitectura)
+6. [Estructura del repositorio](#6-estructura-del-repositorio)
+7. [Puesta en marcha (MVP con Docker)](#7-puesta-en-marcha-mvp-con-docker)
+8. [Agente de IA (recomendaciones)](#8-agente-de-ia-recomendaciones)
+9. [Observabilidad](#9-observabilidad)
+10. [ETL / carga a data warehouse](#10-etl--carga-a-data-warehouse)
+11. [Demo y evidencia](#11-demo-y-evidencia)
+12. [Ejecución sin Docker (desarrollo)](#12-ejecución-sin-docker-desarrollo)
+13. [Documentación técnica](#13-documentación-técnica)
+14. [Modelo de dominio](#14-modelo-de-dominio)
+15. [Flujo de trabajo Git](#15-flujo-de-trabajo-git)
+16. [Formato de entrega](#16-formato-de-entrega)
+17. [Licencia y autor](#17-licencia-y-autor)
 
 ---
 
@@ -48,10 +50,27 @@ flujo transaccional principal.
 > programación. Detalle: [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md).
 
 **Entregables del reto:** documento técnico, MVP ejecutable en un repositorio
-Git, instrucciones de ejecución, evidencia de funcionamiento y declaración de
-uso de IA.
+Git, instrucciones de ejecución, evidencia de funcionamiento, video
+demostrativo y declaración de uso de IA.
 
-## 2. Estado del entregable
+## 2. Video demostrativo
+
+<!-- Pega aquí el enlace (URL) del video demostrativo de la solución -->
+| Formato | Enlace |
+| --- | --- |
+| Video demostrativo | [▶ Ver el video](https://PEGAR-ENLACE-DEL-VIDEO-AQUI) |
+
+**Instrucciones:** edita `README.md`, reemplaza `https://PEGAR-ENLACE-DEL-VIDEO-AQUI`
+por el enlace público del video (YouTube, Drive, Stream…) y, si quieres, añade
+una descripción del recorrido grabado.
+
+> Sugerencia de contenido (3–5 min): CRUD de clientes/cuentas → depósito →
+> transferencia con idempotencia → ledger e invariante contable → observabilidad
+> (Grafana/Prometheus: métricas, trazas y alerta de deadlock) → agente de IA
+> (recomendación recibida sin bloquear la transacción) → evidencia generada por
+> `./scripts/demo.sh`.
+
+## 3. Estado del entregable
 
 | Etapa | Estado |
 | --- | --- |
@@ -63,12 +82,13 @@ uso de IA.
 | Idempotencia, concurrencia (`FOR UPDATE` / `@Version`) e invariante contable | ✅ Hecho |
 | ETL / carga a data warehouse | ✅ Hecho |
 | Ingesta por lotes (`POST /transactions/batch`) | ✅ Hecho |
-| Agente de IA asíncrono (no bloqueante) | ✅ Hecho (worker/outbox verificado end-to-end; mock + OpenRouter) |
+| Agente de IA asíncrono (no bloqueante) | 🟡 Funcional (mock + OpenRouter) |
 | Observabilidad (métricas · logs · trazas · alertas) | ✅ Hecho |
 | Incidente simulado + post mortem | ✅ Hecho |
 | Documentación final + evidencia | ✅ Hecho |
+| Video demostrativo | 🟡 Pendiente de publicar enlace (§2) |
 
-## 3. Stack tecnológico
+## 4. Stack tecnológico
 
 | Capa | Tecnología |
 | --- | --- |
@@ -80,22 +100,39 @@ uso de IA.
 | Observabilidad | **Prometheus**, **Tempo** (OTLP), **Loki** + **Promtail** y **Grafana** provisionada |
 | Despliegue (AWS) | **Terraform** + **GitHub Actions** (OIDC) |
 
-## 4. Arquitectura
+## 5. Arquitectura
 
-```
- clientes / batch ──► smartbancs-api :8080   (REST · virtual threads · reglas de negocio)
-                           │  Spring (JPA / @Transactional)
-                           ▼
-                 smartbancs-infra            (Spring Data JPA + Flyway)
-                           ▼
-                 PostgreSQL 16               (accounts · transactions · ledger · outbox)
-                           │
-          ┌────────────────┼───────────────────┐
-          ▼                ▼                   ▼
-   Bancs (legado)   ETL → fact table     ai-service :8081
-   outbox +         para IA/análisis     (Python/FastAPI · recomendaciones)
+```mermaid
+flowchart LR
+    U["Cliente / Core-banking"] -->|"POST /transactions"| API
+    B["ETL · lote CSV"] -->|"POST /transactions/batch"| API
 
-   Observabilidad transversal: Micrometer → Prometheus · Tempo · Loki · Grafana
+    subgraph Backend["Backend SmartBancs"]
+        API["smartbancs-api :8080<br/>(Java 21 · Spring Boot · virtual threads)"]
+        DOM["smartbancs-domain<br/>(reglas de negocio · Java puro)"]
+        INF["smartbancs-infra<br/>(Spring Data JPA · Flyway)"]
+        API --> DOM --> INF
+        INF --> PG[("PostgreSQL 16<br/>accounts · ledger · outbox_events")]
+        INF -->|"outbox · lotes con throttling"| BANCS["Bancs · core legado"]
+    end
+
+    subgraph IA["Agente de IA (no bloqueante)"]
+        WR["RecommendationWorker<br/>(asíncrono)"]
+        AI["ai-service :8081<br/>(Python 3.12 · FastAPI · OpenRouter + mock)"]
+        WR --> AI
+    end
+    API -.-> WR
+
+    subgraph OBS["Observabilidad (GRAFLO)"]
+        P["Prometheus :9090"]
+        T["Tempo :3200"]
+        L["Loki :3100"]
+        G["Grafana :3333"]
+    end
+    API --> P --> G
+    API --> T --> G
+    API --> L --> G
+    AI --> P
 ```
 
 **Decisiones de diseño** (justificadas en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md)):
@@ -108,7 +145,12 @@ uso de IA.
 - **IA nunca en el camino crítico**: el agente de IA corre como servicio
   separado y se consume de forma asíncrona.
 
-## 5. Estructura del repositorio
+> Diagrama profesional descargable (PlantUML, componentes + secuencia de la
+> transferencia): [`docs/arquitectura.puml`](docs/arquitectura.puml) — ábrelo en
+> plantuml.com, VS Code (extensión PlantUML) o tu IDE favorito. Versión en texto
+> ASCII dentro de [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
+
+## 6. Estructura del repositorio
 
 ```
 RetoTCs/
@@ -119,13 +161,13 @@ RetoTCs/
 ├─ ai-service/             # Agente de IA: Python/FastAPI (OpenRouter + mock avanzado), independiente
 ├─ etl/                    # ETL: transformación + ingesta por lote + fact table
 ├─ scripts/                # demo.sh (evidencia reproducible) · aws-configure.sh
-├─ docs/                   # Documentación técnica (en español)
+├─ docs/                   # Documentación técnica (en español · incluye arquitectura.puml)
 ├─ observability/          # Prometheus · Tempo · Loki · Promtail · Grafana (provisionada)
 ├─ terraform/              # IaC para AWS + workflow OIDC
 └─ docker-compose.yml      # MVP local: PostgreSQL + api + ai-service + observabilidad
 ```
 
-## 6. Puesta en marcha (MVP con Docker)
+## 7. Puesta en marcha (MVP con Docker)
 
 **Prerrequisito:** Docker con el plugin de Compose.
 
@@ -177,7 +219,7 @@ Para borrar también los volúmenes de datos: `docker compose down -v`.
 > `DOCKER_SOCKET=/run/user/$UID/docker.sock` y
 > `DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers`.
 
-## 7. Agente de IA (recomendaciones)
+## 8. Agente de IA (recomendaciones)
 
 El agente de IA vive en **`ai-service`** (**Python 3.12 + FastAPI**) como
 servicio **independiente y asíncrono**: la API nunca lo espera en el flujo de
@@ -202,7 +244,7 @@ la transacción vía worker/outbox).
 > Variables de entorno: `OPENROUTER_API_KEY`, `AI_MODEL` (por defecto
 > `moonshotai/kimi-k2.6`), `AI_HTTP_TIMEOUT`, `LOG_LEVEL`.
 
-## 8. Observabilidad
+## 9. Observabilidad
 
 Se levanta con el mismo `docker compose` y queda integrado **Prometheus**
 (métricas), **Tempo** (trazas OTLP) y **Loki** (logs JSON) en **Grafana**
@@ -223,7 +265,7 @@ estado `firing` en Prometheus.
 Detalle completo (arquitectura, instrumentación, queries y troubleshooting):
 [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md).
 
-## 9. ETL / carga a data warehouse
+## 10. ETL / carga a data warehouse
 
 Proceso que recibe un **lote de datos crudos (no homologados)** desde un
 archivo, los limpia/estandariza y los ingesta como transacciones reales a
@@ -283,7 +325,7 @@ confirmada al re-ejecutar.
 > alias de tipos) la resuelve el ETL; la ambigüedad estructural no es
 > recuperable sin el dialecto de origen.
 
-## 10. Demo y evidencia
+## 11. Demo y evidencia
 
 La API expone **Swagger UI** interactivo y un script genera **evidencia
 reproducible** del funcionamiento:
@@ -306,7 +348,7 @@ Swagger): [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md).
 > La demo crea un cliente temporal sin cuentas y muestra los flujos
 > `204` → `404` y el `409` como protección esperada.
 
-## 11. Ejecución sin Docker (desarrollo)
+## 12. Ejecución sin Docker (desarrollo)
 
 Requiere **JDK 21** (API) y **Python 3.12** (agente de IA):
 
@@ -321,17 +363,18 @@ pip install -r ai-service/requirements.txt
 uvicorn app.main:app --app-dir ai-service --host 0.0.0.0 --port 8081
 ```
 
-## 12. Documentación técnica
+## 13. Documentación técnica
 
 | Documento | Contenido |
 | --- | --- |
 | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Documento técnico: arquitectura, decisiones justificadas, integración con `Bancs`, manejo del modelo de IA y estado de implementación |
+| [`docs/arquitectura.puml`](docs/arquitectura.puml) | Diagrama profesional **PlantUML** (componentes + secuencia de la transferencia) |
 | [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | Estrategia de observabilidad: SLIs/SLOs, alertas, verificación en vivo y troubleshooting |
 | [`docs/INCIDENTE_Y_POST_MORTEM.md`](docs/INCIDENTE_Y_POST_MORTEM.md) | Incidente simulado, acciones inmediatas, escalamiento y plantilla de post mortem |
 | [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | Declaración de uso de IA (herramientas, componentes y verificación humana) |
 | [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | Guía de demostración paso a paso con Swagger |
 
-## 13. Modelo de dominio
+## 14. Modelo de dominio
 
 El núcleo de negocio se organiza por **contextos acotados**:
 
@@ -341,15 +384,37 @@ El núcleo de negocio se organiza por **contextos acotados**:
 - **Integración con Bancs** — patrón outbox y reconciliación.
 - **Clientes (Customers)** — identidad y segmento.
 
-## 14. Flujo de trabajo Git
+## 15. Flujo de trabajo Git
 
-- `main` — releases estables, solo mediante pull requests.
-- `develop` — rama de integración.
-- `feature/*` — trabajo aislado por entregable.
+| Rama | Rol |
+| --- | --- |
+| `main` | **Estable / entrega** — releases; solo por merge de `develop` (fast-forward o PR) |
+| `develop` | Integración — punto único donde converge el trabajo |
+| `feature/*` | Trabajo aislado por entregable, y se integra a `develop` al terminar |
+| `develop-backup` / respaldos | Solo locales y puntuales (no se pushean) |
+
 - [Conventional commits](https://www.conventionalcommits.org/) como estilo de
   mensajes de commit.
+- `main` siempre debe reflejar un estado desplegable con el README de entrega
+  en español.
 
-## 15. Licencia y autor
+## 16. Formato de entrega
+
+| Entregable | Ubicación / Formato | Estado |
+| --- | --- | --- |
+| Documento técnico | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) + [`docs/arquitectura.puml`](docs/arquitectura.puml) | ✅ Listo |
+| MVP ejecutable | Repositorio Git · `docker compose up --build -d` | ✅ Listo |
+| Instrucciones | Este README · guía en [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | ✅ Listo |
+| Evidencia de funcionamiento | `scripts/` (`./scripts/demo.sh`) y capturas del stack | ✅ Listo |
+| Video demostrativo | [Enlace en §2](#2-video-demostrativo) | 🟡 Pendiente de publicar |
+| Incidente + post mortem | [`docs/INCIDENTE_Y_POST_MORTEM.md`](docs/INCIDENTE_Y_POST_MORTEM.md) | ✅ Listo |
+| Observabilidad y alertas | [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | ✅ Listo |
+| Declaración de uso de IA | [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | ✅ Listo |
+
+**Resumen de ramas:** `main` = entrega estable (con este README) · `develop` =
+integración · `feature/*` = trabajo por entregable.
+
+## 17. Licencia y autor
 
 | | |
 | --- | --- |
