@@ -1,0 +1,53 @@
+name: terraform
+
+on:
+  pull_request:
+    paths: [terraform/**]
+  push:
+    branches: [develop, main]
+    paths: [terraform/**]
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    name: terraform plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: configure AWS (OIDC)
+        id: aws
+        if: ${{ vars.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aud: sts.amazonaws.com
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: terraform init
+        if: ${{ steps.aws.outcome == 'success' }}
+        run: terraform init
+
+      - name: terraform validate
+        if: ${{ steps.aws.outcome == 'success' }}
+        run: terraform validate
+
+      - name: terraform plan
+        if: ${{ steps.aws.outcome == 'success' }}
+        run: |
+          terraform plan \
+            -var-file=terraform.tfvars.example \
+            -out=tfplan

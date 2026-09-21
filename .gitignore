@@ -47,3 +47,14 @@ node_modules/
 # Personal / local tooling
 .sonarlint/
 .history/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!*.tfvars.example
+
+# AWS local config (outside repo, but never tracked here)
+.aws/
