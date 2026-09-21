@@ -217,10 +217,78 @@
       }
     },
     {
+      "type": "row",
+      "title": "Base de datos y pool de conexiones (incidente: deadlocks / timeouts)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Deadlocks PostgreSQL (por minuto)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 41 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(pg_stat_database_deadlocks{datname=\"smartbancs\"}[5m])",
+          "legendFormat": "deadlocks"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Conexiones activas (pg_stat_database) y pool Hikari",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 41 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "pg_stat_database_numbackends{datname=\"smartbancs\"}",
+          "legendFormat": "backends DB"
+        },
+        {
+          "refId": "B",
+          "expr": "hikaricp_connections_active{application=\"smartbancs-api\"}",
+          "legendFormat": "hikari activas"
+        },
+        {
+          "refId": "C",
+          "expr": "hikaricp_connections_pending{application=\"smartbancs-api\"}",
+          "legendFormat": "hikari esperando"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Timeouts de adquisición de conexión (Hikari)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 41 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(hikaricp_connections_timeout_total{application=~\"smartbancs.*\"}[5m])",
+          "legendFormat": "{{application}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
       "type": "logs",
       "title": "Logs (Loki) - aplicaciones SmartBancs",
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 40 },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 48 },
       "targets": [
         {
           "refId": "A",

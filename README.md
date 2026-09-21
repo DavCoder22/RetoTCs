@@ -1,128 +1,158 @@
 # SmartBancs App
 
-Technical challenge for the **NextGen Engineering** process.
+Reto técnico de ingeniería para el proceso **NextGen Engineering**.
 
-SmartBancs is a financial platform that processes **real-time transactions** and provides **personalized financial recommendations** powered by AI.
+SmartBancs es una plataforma financiera que procesa **transacciones en tiempo
+real** y ofrece **recomendaciones financieras personalizadas** impulsadas por
+IA, integrada con el core bancario legado (`Bancs`).
 
-## Challenge summary
+## Resumen del reto
 
-- Support high transaction peaks, for example **10,000 transactions per second**.
-- Integrate with the legacy banking core (`Bancs`) without degrading its performance.
-- Complete a transfer in less than **2 seconds**.
-- AI recommendations must **never block** the main transaction flow.
+- Soportar picos altos de transacciones, por ejemplo **10 000 transacciones por segundo**.
+- Integrarse con el core bancario legado (`Bancs`) **sin degradar su rendimiento**.
+- Completar una transferencia en **menos de 2 segundos**.
+- Las recomendaciones de IA **nunca deben bloquear** el flujo transaccional principal.
 
-Required deliverables: a technical document, a runnable **MVP** hosted in a Git repository, run instructions, evidence, and an AI usage declaration.
+Entregables requeridos: documento técnico, **MVP** ejecutable alojado en un
+repositorio Git, instrucciones de ejecución, evidencia y declaración de uso de IA.
 
-## Status
+## Estado del entregable
 
-| Stage | State |
+| Etapa | Estado |
 | --- | --- |
-| Project bootstrap (devcontainer, structure, domain model) | Done |
-| Local MVP via Docker Compose (PostgreSQL + API + AI service) | Done |
-| Business core (3-layer architecture) | Done |
-| Data access + PostgreSQL schema (Flyway) | Done |
-| REST CRUD: customers, accounts, transactions + transfers/ledger | Done |
-| AI async service | Pending |
-| ETL / data warehouse load | Done |
-| Observability (metrics, logs, traces) | Done |
-| Incident simulation + post mortem | Pending |
-| Final documentation + evidence | Pending |
+| Bootstrap del proyecto (devcontainer, estructura, modelo de dominio) | ✅ Hecho |
+| MVP local con Docker Compose (PostgreSQL + API + IA + observabilidad) | ✅ Hecho |
+| Núcleo de negocio (arquitectura en 3 capas) | ✅ Hecho |
+| Acceso a datos + esquema PostgreSQL (Flyway) | ✅ Hecho |
+| REST CRUD: customers, accounts, transactions + transferencias/ledger | ✅ Hecho |
+| Idempotencia, concurrencia (`FOR UPDATE`/`@Version`) e invariante contable | ✅ Hecho |
+| ETL / carga a data warehouse | ✅ Hecho |
+| Ingesta por lotes (`POST /transactions/batch`) | ✅ Hecho |
+| Servicio de IA asíncrono | 🟡 Pendiente (mock funcional) |
+| Observabilidad (métricas · logs · trazas · alertas) | ✅ Hecho |
+| Incidente simulado + post mortem | ✅ Hecho |
+| Documentación final + evidencia | ✅ Hecho |
 
-## Tech stack
+## Stack tecnológico
 
-- **Java 21** (virtual threads) and **Spring Boot 3** / Maven
-- **PostgreSQL 16** (planned)
-- **Docker** and **Docker Compose** (infrastructure as code)
-- **Devcontainer**: reproducible development environment
+- **Java 21** (virtual threads) y **Spring Boot 3** / Maven (multimódulo: domain, infra, api).
+- **PostgreSQL 16** (Flyway para el esquema).
+- **Docker** y **Docker Compose** (entorno local como infraestructura como código).
+- **Devcontainer**: entorno de desarrollo reproducible (JDK 21 + Maven + Docker).
+- **Observabilidad**: Prometheus, Tempo (OTLP), Loki + Promtail y Grafana provisionada.
+- **Terraform + GitHub Actions (OIDC)**: scaffolding de despliegue en AWS.
 
-## Repository structure
+## Arquitectura
+
+```
+  clientes/batch ──► smartbancs-api :8080  (REST, virtual threads, reglas de negocio)
+                        │ Spring (JPA / @Transactional)
+                        ▼
+               smartbancs-infra  (Spring Data JPA + Flyway)
+                        ▼
+               PostgreSQL 16  (accounts · transactions · ledger · outbox)
+                        │
+      ┌─────────────────┼──────────────────┐
+      ▼                 ▼                  ▼
+   Bancs (legado)   ETL → fact table   ai-service :8081 (asíncrono, no bloqueante)
+
+   Observabilidad transversal: Micrometer → Prometheus · Tempo · Loki · Grafana
+```
+
+Decisiones clave (patrón **outbox** para integrar con Bancs sin tráfico
+síncrono, locks ordenados por fila + versión optimista para evitar doble gasto,
+idempotencia, "IA nunca en el camino crítico") y el detalle completo de la
+arquitectura: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
+
+## Estructura del repositorio
 
 ```
 RetoTCs/
-├─ .devcontainer/          # JDK 21 + Maven + Docker development environment
-├─ smartbancs-api/         # Boot app: controllers, DTOs, security, error handling
-├─ smartbancs-domain/      # Entities, enums and business rules (pure Java)
-├─ smartbancs-infra/       # Data access, Flyway, ai-client, bancs-client, ETL
-├─ ai-service/             # AI recommendation service (mock), standalone
-├─ db/                     # Raw DDL / DML scripts (challenge requirement)
-├─ scripts/                # Load tests, seed data, evidence
-├─ etl/                    # ETL: transformación + ingesta por lote (ver sección ETL)
-├─ docs/                   # Architecture, ADRs, incident, post mortem, defense
-├─ observability/          # Prometheus, Tempo, Loki, Promtail + Grafana (provisioned)
-└─ docker-compose.yml      # Local MVP: PostgreSQL 16 + api + ai-service + observability stack
+├─ .devcontainer/          # Entorno de desarrollo reproducible (JDK 21 + Maven + Docker)
+├─ smartbancs-api/         # App Boot: controllers, DTOs, servicios, manejo de errores, métricas
+├─ smartbancs-domain/      # Entidades, enums y reglas de negocio (Java puro)
+├─ smartbancs-infra/       # Acceso a datos, Flyway, repositorios, clientes IA/Bancs
+├─ ai-service/             # Servicio de recomendaciones IA (mock), independiente
+├─ etl/                    # ETL: transformación + ingesta por lote + fact table (ver sección ETL)
+├─ scripts/                # demo.sh (evidencia reproducible), aws-configure.sh
+├─ docs/                   # Documentación técnica (en español)
+├─ observability/          # Prometheus, Tempo, Loki, Promtail + Grafana (provisionada)
+├─ terraform/              # IaC para AWS + workflow OIDC
+└─ docker-compose.yml      # MVP local: PostgreSQL 16 + api + ai-service + observabilidad
 ```
 
-## How to run the project (local MVP with Docker)
+## Cómo ejecutar el proyecto (MVP local con Docker)
 
-Prerequisites: **Docker** with the Compose plugin.
+Prerrequisito: **Docker** con el plugin de Compose.
 
-1. (Optional) Copy `.env.example` to `.env` and set your own credentials.
-2. Build and start the stack:
+1. (Opcional) Copia `.env.example` a `.env` y define tus propias credenciales.
+2. Construye y levanta el stack:
 
    ```bash
    docker compose up --build -d
    ```
 
-3. Verify health:
+3. Verifica el estado de salud:
 
    ```bash
    docker compose ps
    ```
 
-4. Check the endpoints:
+   Debe quedar **healthy** (BD, api, ai-service y los servicios de observabilidad).
 
-   - API: `http://localhost:8080/health` (actuator: `http://localhost:8080/actuator/health`)
-   - AI service: `http://localhost:8081/actuator/health`
-   - PostgreSQL: `localhost:5432` (db `smartbancs`, user `smartbancs`)
+4. Comprueba los endpoints:
 
-5. Stop the stack:
+   | Servicio | URL |
+   | --- | --- |
+   | API (health): | `http://localhost:8080/actuator/health` |
+   | Swagger UI (API): | `http://localhost:8080/swagger-ui.html` |
+   | OpenAPI spec: | `http://localhost:8080/v3/api-docs` |
+   | AI service (health): | `http://localhost:8081/actuator/health` |
+   | PostgreSQL: | `localhost:5432` (db `smartbancs`, usuario `smartbancs`) |
+   | Grafana: | `http://localhost:3333` (`admin`/`admin`, configurable) |
+   | Prometheus: | `http://localhost:9090` |
+   | Tempo: | `http://localhost:3200` |
+   | Loki: | `http://localhost:3100` |
+   | postgres-exporter: | `http://localhost:9187/metrics` |
+
+5. Detén el stack:
 
    ```bash
    docker compose down
    ```
 
-   Remove data volumes too with `docker compose down -v`.
+   Para eliminar también los volúmenes de datos: `docker compose down -v`.
 
 > **Docker rootless (Linux):** si `promtail` no encuentra el daemon, exporta las
 > rutas antes de `docker compose up`:
 > `DOCKER_SOCKET=/run/user/$UID/docker.sock` y
 > `DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers`.
 
-## Observabilidad (metrics · logs · traces)
+## Observabilidad (métricas · logs · trazas · alertas)
 
-El stack de observabilidad se levanta con el mismo `docker compose` y queda
-lista la integración de **Prometheus** (métricas), **Tempo** (traces OTLP) y
-**Loki** (logs JSON) con **Grafana** ya provisionada:
+El stack de observabilidad se levanta con el mismo `docker compose` e integra
+**Prometheus** (métricas), **Tempo** (trazas OTLP) y **Loki** (logs JSON) con
+**Grafana** provisionada automáticamente (datasources + dashboard "SmartBancs –
+Observabilidad").
 
-- Grafana (dashboard "SmartBancs - Observabilidad"): `http://localhost:3333` — usuario `admin`, contraseña `admin` (configurable vía `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`). Si `3333` está ocupado, cambia `GRAFANA_HOST_PORT`.
-- Prometheus: `http://localhost:9090` · Tempo: `http://localhost:3200` · Loki: `http://localhost:3100`
-- Métricas: `http://localhost:8080/actuator/prometheus` y `http://localhost:8081/actuator/prometheus`
-- Cada transacción expone métricas de negocio (`smartbancs_transactions_total`, `smartbancs_transaction_duration_seconds`, `smartbancs_transaction_amount_*`), trazas y logs correlacionados por `traceId`.
+- **Métricas**: `http://localhost:8080/actuator/prometheus` (api) y
+  `http://localhost:8081/actuator/prometheus` (IA). Cada transacción expone
+  `smartbancs_transactions_total`, `smartbancs_transaction_duration_seconds`,
+  `smartbancs_transaction_amount_*`.
+- **Trazas y logs**: correlacionados por `traceId`; en Grafana → Explore puedes
+  saltar del log a la traza completa en Tempo.
+- **Alertas por SLO** (reglas PromQL en `observability/prometheus/rules.yml`):
+  instancia caída, latencia de transferencia, tasa de error (HTTP y de
+  transacciones), timeouts/esperas del pool Hikari, **deadlocks** y conexiones
+  altas de PostgreSQL.
+- **Validado en vivo**: pico simulado de carga y deadlock controlado →
+  contador `pg_stat_database_deadlocks` incrementado y alerta
+  `Postgres_Deadlocks` en estado **firing** en Prometheus.
 
-Detalle completo (arquitectura, instrumentación, queries, verificación y
-troubleshooting): [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md).
+Detalle completo (arquitectura, instrumentación, queries, troubleshooting):
+[`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md).
 
-## Demo y evidencia
-
-La API expone **Swagger UI** interactivo (misma experiencia que FastAPI) y un script genera evidencia reproducible del funcionamiento.
-
-- **Swagger UI (API):** `http://localhost:8080/swagger-ui.html`
-- **OpenAPI spec:** `http://localhost:8080/v3/api-docs`
-- **Swagger UI (AI service):** `http://localhost:8081/swagger-ui.html`
-
-Generar la evidencia de la demo completa (CRUD, depósito, transferencia con idempotencia, ledger, invariante contable, casos de error, estado del stack y logs):
-
-```bash
-./scripts/demo.sh
-```
-
-El script crea `scripts/evidencia/run-<timestamp>/` con 17 archivos (`00-estado-stack.txt` … `16-resumen.txt`). La carpeta `scripts/evidencia/` no se versiona (`.gitignore`).
-
-Para una **presentación pública paso a paso** (journey completo clic-a-clic en Swagger, enfocado en funciones y capas): [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md).
-
-> **Regla de negocio (DELETE):** `DELETE /customers/{id}` y `DELETE /accounts/{id}` devuelven `409 CONFLICT` cuando el recurso tiene dependencias: un cliente no se borra si todavía tiene cuentas, y una cuenta no se borra si tiene saldo distinto de 0 o historial de movimientos. Para demostrar el borrado, la demo crea un cliente temporal sin cuentas (flujo `204` → `404`) y muestra el `409` como protección esperada en `04-crear-cliente.txt`.
-
-## ETL / data warehouse load
+## ETL / carga a data warehouse
 
 Proceso que recibe un **lote de datos crudos (no homologados)** desde un archivo,
 los limpia/estandariza y los ingesta como transacciones reales a través de la
@@ -173,46 +203,77 @@ Salida (en `etl/output/`, no versionado):
 
 Ejemplo de ejecución real (lote de muestra): 16 filas crudas → 11 válidas →
 10 analizables (1 duplicada omitida) → 9 publicadas → **8 aceptadas** y 1 rechazada
-por regla de negocio (`insufficient funds`), idempotencia confirmada en re-ejecución.
+por regla de negocio (`insufficient funds`), con idempotencia confirmada al re-ejecutar.
 
 > **Nota de calidad de datos:** el CSV debe ser *estructuralmente* válido (comas
-> internas entre comillas). La “suciedad” semántica (formatos, nulos, alias de tipos)
+> internas entre comillas). La "suciedad" semántica (formatos, nulos, alias de tipos)
 > la resuelve el ETL; la ambigüedad estructural no es recuperable sin el dialecto
 > de origen.
 
-## Run without Docker (development)
+## Demo y evidencia
 
-Requires **JDK 21**:
+La API expone **Swagger UI** interactivo y un script genera evidencia reproducible
+del funcionamiento:
 
 ```bash
-./mvnw clean package -DskipTests     # build all modules
+./scripts/demo.sh
+```
+
+El script crea `scripts/evidencia/run-<timestamp>/` con 17 archivos
+(`00-estado-stack.txt` … `16-resumen.txt`) que cubren CRUD, depósito,
+transferencia con idempotencia, ledger, invariante contable, casos de error,
+estado del stack y logs. `scripts/evidencia/` no se versiona (`.gitignore`).
+
+Para una **presentación pública paso a paso** (journey completo clic-a-clic en
+Swagger): [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md).
+
+> **Regla de negocio (DELETE):** `DELETE /customers/{id}` y
+> `DELETE /accounts/{id}` devuelven `409 CONFLICT` cuando el recurso tiene
+> dependencias: un cliente no se borra si todavía tiene cuentas, y una cuenta no
+> se borra si tiene saldo distinto de 0 o historial de movimientos. La demo crea
+> un cliente temporal sin cuentas para mostrar el flujo `204` → `404`.
+
+## Ejecución sin Docker (desarrollo)
+
+Requiere **JDK 21**:
+
+```bash
+./mvnw clean package -DskipTests     # construye todos los módulos
 java -jar smartbancs-api/target/smartbancs-api-0.1.0-SNAPSHOT.jar
 java -jar ai-service/target/ai-service-0.1.0-SNAPSHOT.jar
 ```
 
-Detailed test and stop instructions are published in a later stage (documentation deliverable).
+## Documentación técnica (en español)
 
-## Domain model
+| Documento | Contenido |
+| --- | --- |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Documento técnico: arquitectura, decisiones justificadas, integración con Bancs, manejo del modelo de IA, estado de implementación |
+| [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | Estrategia de observabilidad: SLIs/SLOs, alertas, verificación en vivo y troubleshooting |
+| [`docs/INCIDENTE_Y_POST_MORTEM.md`](docs/INCIDENTE_Y_POST_MORTEM.md) | Incidente simulado, acciones inmediatas, escalamiento y plantilla de post mortem |
+| [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | Declaración de uso de IA (herramientas y componentes donde se aplicó) |
+| [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | Guía de demostración paso a paso con Swagger |
 
-The business core is organized by bounded contexts:
+## Modelo de dominio
 
-- **Accounts** — balance, status, limits (e.g. a frozen account cannot operate).
-- **Transactions** — atomic transfer, idempotency, ledger entries.
-- **Recommendations** — AI output generated asynchronously.
-- **Integration with Bancs** — outbox and reconciliation pattern.
-- **Customer** — identity and segment.
+El núcleo de negocio se organiza por contextos acotados:
 
-## Git workflow
+- **Accounts** — saldo, estado y límites (p. ej. una cuenta bloqueada no opera).
+- **Transactions** — transferencia atómica, idempotencia, asientos de ledger.
+- **Recommendations** — salida de IA generada de forma asíncrona.
+- **Integración con Bancs** — patrón outbox y reconciliación.
+- **Customer** — identidad y segmento.
 
-- `main` — stable releases, merged only through pull requests.
-- `develop` — integration branch.
-- `feature/*` — isolated work per deliverable.
-- Conventional commits in English (for example `feat(core): add transaction entity`).
+## Flujo de trabajo Git
 
-## License
+- `main` — releases estables, solo por pull requests.
+- `develop` — rama de integración.
+- `feature/*` — trabajo aislado por entregable.
+- [Conventional commits](https://www.conventionalcommits.org/) (o consenso del equipo).
 
-GPL-2.0 — see [LICENSE](LICENSE).
+## Licencia
 
-## Author
+GPL-2.0 — ver [LICENSE](LICENSE).
 
-David Malquin (DavCoder22) — NextGen Engineering candidate.
+## Autor
+
+David Malquin (DavCoder22) — candidato NextGen Engineering.

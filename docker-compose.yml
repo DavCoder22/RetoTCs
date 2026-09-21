@@ -60,6 +60,17 @@ services:
       timeout: 5s
       retries: 12
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: smartbancs-postgres-exporter
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-smartbancs}:${POSTGRES_PASSWORD:-smartbancs}@postgres:5432/${POSTGRES_DB:-smartbancs}?sslmode=disable
+    ports:
+      - "9187:9187"
+
   prometheus:
     image: prom/prometheus:v2.53.1
     container_name: smartbancs-prometheus
@@ -70,6 +81,7 @@ services:
         condition: service_healthy
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'

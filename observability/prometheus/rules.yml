@@ -1,0 +1,90 @@
+groups:
+  - name: smartbancs-slos
+    rules:
+      # Disponibilidad: instancia no responde
+      - alert: SmartBancs_InstanciaCaida
+        expr: up{job=~"smartbancs-api|smartbancs-ai-service|postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: smartbancs
+        annotations:
+          summary: "Instancia {{ $labels.job }} / {{ $labels.instance }} sin respuesta"
+          description: "La instancia {{ $labels.instance }} (job {{ $labels.job }}) no está exponiendo métricas desde hace 1 minuto."
+
+      # SLO de negocio: transferencia debe completarse en < 2 s. Alerta si el p95 se acerca (1.5 s).
+      - alert: SmartBancs_LatenciaTransferenciaAlta
+        expr: histogram_quantile(0.95, sum(rate(smartbancs_transaction_duration_seconds_bucket{type="TRANSFER"}[5m])) by (le)) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          team: smartbancs
+        annotations:
+          summary: "Latencia p95 de transferencias > 1.5 s"
+          description: "El p95 de procesamiento de TRANSFER supera 1.5 s. El SLO exige < 2 s. Revisar contención de filas (FOR UPDATE), pool de conexiones y tamaño de índices."
+
+      # SLO de API: tasa de errores HTTP 5xx
+      - alert: SmartBancs_TasaErrorHttpAlta
+        expr: (sum(rate(http_server_requests_seconds_count{application="smartbancs-api",status=~"5.."}[5m])) by (application) / clamp_min(sum(rate(http_server_requests_seconds_count{application="smartbancs-api"}[5m])) by (application), 1)) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          team: smartbancs
+        annotations:
+          summary: "Tasa de errores HTTP 5xx > 1% ({{ $labels.application }})"
+          description: "El porcentaje de respuestas 5xx superó 1% durante 5 minutos consecutivos."
+
+      # SLO de negocio: errores de procesamiento (fondos insuficientes, cuentas no activas, tx fallidas)
+      - alert: SmartBancs_TasaErrorTransaccionesAlta
+        expr: (sum(rate(smartbancs_transactions_total{outcome="error"}[5m])) by (application) / clamp_min(sum(rate(smartbancs_transactions_total[5m])) by (application), 1)) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: smartbancs
+        annotations:
+          summary: ">5% de transacciones fallidas ({{ $labels.application }})"
+          description: "La tasa de transacciones con outcome=error supera 5%. Correlacionar con logs en Loki (buscar 'request failed') y trazas en Tempo."
+
+      # Incidente simulado: timeouts de adquisición de conexión (HikariCP)
+      - alert: SmartBancs_TimeoutPoolConexiones
+        expr: increase(hikaricp_connections_timeout_total{application=~"smartbancs.*"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: smartbancs
+        annotations:
+          summary: "Timeouts adquiriendo conexiones de BD ({{ $labels.application }})"
+          description: "HikariCP generó timeouts de adquisición de conexión. Síntoma típico de agotamiento del pool por queries lentas o bloqueos. Ejecutar pg_stat_activity y finalizar transacciones ociosas/largas."
+
+      # Incidente simulado: conexiones del pool pendientes (espera por lock/conexión)
+      - alert: SmartBancs_EsperasPoolAlto
+        expr: hikaricp_connections_pending{application="smartbancs-api"} > 5
+        for: 3m
+        labels:
+          severity: warning
+          team: smartbancs
+        annotations:
+          summary: "Hilo de peticiones esperando conexión del pool"
+          description: "Hay más de 5 peticiones esperando una conexión JDBC. Apunta a queries lentas / locks no liberados."
+
+      # Incidente simulado: deadlocks detectados por PostgreSQL
+      - alert: Postgres_Deadlocks
+        expr: increase(pg_stat_database_deadlocks{datname=~"smartbancs|template.*"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          team: smartbancs
+        annotations:
+          summary: "Deadlocks detectados en PostgreSQL"
+          description: "Se detectaron deadlocks ({{ $value }}) en la base {{ $labels.datname }}. Revisar orden de bloqueo de filas en transferencias/ledger y pg_stat_activity con state=active."
+
+      # Incidente simulado: conexiones activas altas
+      - alert: Postgres_ConexionesAltas
+        expr: pg_stat_database_numbackends{datname=~"smartbancs"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: smartbancs
+        annotations:
+          summary: "Número de conexiones a PostgreSQL muy alto"
+          description: "Hay {{ $value }} backends en la base. Verificar que el pool (Hikari) no esté por encima de lo configurado y que no existan conexiones filtradas/ociosas."

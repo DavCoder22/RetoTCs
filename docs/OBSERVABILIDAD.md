@@ -19,7 +19,7 @@
                         │  └──────────────────────────────────────────────┘
                                     │ scrape :9090/targets
                         ┌───────────▼───────────┐   datasources
-                        │   Prometheus:9090     ├──────►  Grafana:3001
+                        │   Prometheus:9090     ├──────►  Grafana:3333
                         └───────────────────────┘
 ```
 
@@ -31,6 +31,7 @@ Las piezas nuevas se agrupan en la carpeta **`observability/`**:
 | `tempo` | `grafana/tempo:2.6.1` | `3200` (UI/API), `4317` gRPC, `4318` HTTP | Receptor **OTLP** y almacén de traces |
 | `loki` | `grafana/loki:3.3.2` | `3100` | Almacén de logs (retention 7 días) |
 | `promtail` | `grafana/promtail:3.3.2` | — (interno) | Descubre contenedores `smartbancs-*` y envía sus logs JSON a Loki |
+| `postgres-exporter` | `prometheuscommunity/postgres-exporter:v0.15.0` | `9187` | Métricas de PostgreSQL: deadlocks, conexiones, committed/rolled-back |
 | `grafana` | `grafana/grafana:11.4.0` | `3333` | Dashboards y Explore (Prometheus + Tempo + Loki) |
 
 Grafana se provisiona automáticamente (datasources + dashboard) desde
@@ -103,8 +104,10 @@ docker compose up --build -d
 | Prometheus | http://localhost:9090 | — |
 | Tempo | http://localhost:3200 | — |
 | Loki | http://localhost:3100 | — |
+| Métricas de PostgreSQL | http://localhost:9187/metrics | — |
 | Métricas API | http://localhost:8080/actuator/prometheus | — |
 | Métricas AI service | http://localhost:8081/actuator/prometheus | — |
+| Alertas (Prometheus rules) | http://localhost:9090/rules | — |
 
 Si `3333` está ocupado, cambia `GRAFANA_HOST_PORT` (`.env`): el puerto host de
 Grafana es configurable.
@@ -136,6 +139,71 @@ raíz para cruzar con Tempo.
 sum(rate(smartbancs_transactions_total{outcome="success"}[5m])) by (type)
 histogram_quantile(0.95, sum(rate(smartbancs_transaction_duration_seconds_bucket[5m])) by (le, type))
 ```
+
+## Diseño de observabilidad (estrategia para detectar problemas)
+
+El reto exige definir *qué* información se usa para identificar problemas de
+rendimiento, degradación o fallo y *por qué*. La estrategia se basa en tres
+pilares complementarios (**métricas → tendencias, logs → contexto, traces →
+recorrido**) con **SLIs/SLOs** negociables y **alertas por SLO**.
+
+### Mapa de señales (qué se captura, qué detecta y por qué)
+
+| Señal | Fuente (métrica/log/trace) | Problema que identifica | Por qué es útil |
+| --- | --- | --- | --- |
+| Disponibilidad de instancias | `up{job}` | Servicio caído / crash-loop | Primera línea: proceso muerto o healthcheck fallando |
+| Tasa de peticiones HTTP | `http_server_requests_seconds_count` | Incremento/drop de tráfico | Aísla si el problema es de demanda o de capacidad |
+| Latencia HTTP y timeout 5xx | `http_server_requests_seconds_*` | Servicio degradado (cola de hilos/threads) | El reto exige transferencias **< 2 s**; la latencia es el SLI de negocio. Los 5xx = errores que llegan al usuario |
+| Latencia de procesamiento por tipo | `smartbancs_transaction_duration_seconds_bucket` | Cuál operación se degrada (TRANSFER vs DEPOSIT) | Histograma → percentiles p50/p95/p99; permite preguntar "¿qué tipo de transacción y cuánta latencia?" |
+| Errores de negocio | `smartbancs_transactions_total{outcome="error"}` | Fallos lógicos (fondos, cuenta no activa) | Volumen exacto de operaciones rechazadas; cruzar con logs (`request failed`) |
+| Volume transaccional | `smartbancs_transactions_total{outcome="success"}` | Throughput, picos de quincena | Benchmarks contra el objetivo de 10 000 tps |
+| Planificación de la BD | `hikaricp_connections_pending`, `hikaricp_connections_timeout_total` | **Timeout de conexión** (escenario del incidente) | Indica que el pool JDBC se agotó: queries lentas o locks reteniendo conexiones |
+| Salud de PostgreSQL | `pg_stat_database_deadlocks`, `pg_stat_database_numbackends`, commits/rollbacks | **Deadlocks** y saturación de conexiones | `pg_stat_database_deadlocks` sube → orden de bloqueo de filas incorrecto; es la prueba directa del caso simulado |
+| JVM / proceso | `jvm_memory_used_bytes`, `process_cpu_usage`, `process_threads` | OOM, GC o CPU pegado | Distingue problemas de la app (memoria/hilos) de la BD |
+| Logs JSON estructurados | Loki | Causa raíz específica (SQL, stacktrace, motivo) | Con `traceId` en cada log se puede saltar al trace y reconstruir la petición exacta |
+| Trazas distribuidas | Tempo | Recorrido completo de una transacción a través de componentes (API → repositorio → BD) | Timing por span: ¿el 2 s se gasta en BD, en serialización o en IA? |
+
+### SLIs y SLOs definidos para SmartBancs
+
+| SLI (indicador) | Definición | SLO objetivo |
+| --- | --- | --- |
+| Latencia de transferencia | p95 de `smartbancs_transaction_duration_seconds{type="TRANSFER"}` | < 2 s (exigencia del reto); alerta preventiva a 1.5 s |
+| Tasa de error HTTP | 5xx / total de `http_server_requests` | < 1 % |
+| Tasa de error transaccional | `outcome="error"` / total de transacciones | < 5 % |
+| Éxito del procesamiento | transacciones `success` vs `error`+`idempotent` | ≥ 99.9 % |
+| Deadlocks | `increase(pg_stat_database_deadlocks)` | 0 |
+| Disponibilidad | `up` de instancias | 99.9 % mensual |
+
+### Alertas implementadas (`observability/prometheus/rules.yml`)
+
+| Alerta | Expresión (resumen) | Severidad | Qué ordena iniciar |
+| --- | --- | --- | --- |
+| `SmartBancs_InstanciaCaida` | `up == 0` durante 1 m | critical | Verificar proceso/health; revisar build reciente |
+| `SmartBancs_LatenciaTransferenciaAlta` | p95 TRANSFER > 1.5 s | warning | Inspeccionar spans de BD en Tempo; `pg_stat_activity` |
+| `SmartBancs_TasaErrorHttpAlta` | 5xx > 1 % | warning | Revisar logs `WARN/ERROR` en Loki |
+| `SmartBancs_TasaErrorTransaccionesAlta` | errores > 5 % | warning | Detectar regla de negocio rota o datos corruptos |
+| `SmartBancs_TimeoutPoolConexiones` | `hikaricp_connections_timeout_total` aumenta | critical | Acciones inmediatas: terminar transacciones largas, revisar pool |
+| `SmartBancs_EsperasPoolAlto` | `hikaricp_connections_pending > 5` | warning | Detectar acumulación de esperas antes del timeout |
+| `Postgres_Deadlocks` | deadlocks aumentan en 10 m | critical | Deadlock: orden de locks, `pg_stat_activity` |
+| `Postgres_ConexionesAltas` | `numbackends > 80` | warning | Sobredimensionar pool o detectar conexiones filtradas |
+
+> **Validación realizada**: se inyectó un deadlock controlado (advisory locks,
+> sin tocar datos de negocio) y la alerta `Postgres_Deadlocks` pasó de
+> `inactive → pending → firing` en Prometheus, confirmando el ciclo métrica →
+> regla → alerta.
+
+### Por qué métricas + logs + traces juntos
+
+- **Las métricas responden "qué está mal" y "desde cuándo"** (tendencia, picos,
+  percentiles). Son baratas de almacenar y consultar a largo plazo.
+- **Los logs responden "qué pasó exactamente"** (query SQL, motivo de rechazo,
+  stacktrace). Son la fuente de la *causa raíz*.
+- **Los traces responden "por dónde pasó" una petición** (span por span) y unen
+  las piezas: un `traceId` en un log de error permite abrir el recorrido completo
+  en Tempo y ver si el tiempo se consumió en la BD o en otro componente.
+
+En conjunto: métrica alerta (p. ej. `TimeoutPoolConexiones`), log detalla la
+petición afectada y la traza muestra el span donde se superó el tiempo de espera.
 
 ## Verificación rápida (end-to-end)
 
