@@ -2,6 +2,8 @@ package com.smartbancs.api.controller;
 
 import com.smartbancs.api.dto.CreateTransactionRequest;
 import com.smartbancs.api.dto.LedgerEntryResponse;
+import com.smartbancs.api.dto.TransactionBatchRequest;
+import com.smartbancs.api.dto.TransactionBatchResponse;
 import com.smartbancs.api.dto.TransactionResponse;
 import com.smartbancs.api.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -86,5 +88,21 @@ public class TransactionController {
                 body.type(), body.amount(), body.currency(),
                 body.debitAccountId(), body.creditAccountId(),
                 body.idempotencyKey(), body.reference());
+    }
+
+    @Operation(summary = "Ingestar lote de transacciones (ETL/batch)",
+            description = "Recibe un lote de transacciones procesadas por el ETL (números de cuenta en lugar de UUID), "
+                    + "resuelve cada accountNumber al accountId interno y aplica las mismas reglas que POST /transactions. "
+                    + "Tolera errores parciales: cada ítem se reporta como accepted o rejected sin abortar el lote.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Lote procesado: accepted/rejected y detalle por ítem."),
+            @ApiResponse(responseCode = "400", description = "Validación: lote vacío, moneda inválida o tipo no soportado."),
+            @ApiResponse(responseCode = "404", description = "Un accountNumber del lote no existe (se reporta como rejected)."),
+            @ApiResponse(responseCode = "422", description = "Fondos insuficientes o cuenta no activa (se reporta como rejected).")
+    })
+    @PostMapping("/batch")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TransactionBatchResponse createBatch(@Valid @RequestBody TransactionBatchRequest body) {
+        return transactionService.createBatch(body.batchId(), body.items());
     }
 }

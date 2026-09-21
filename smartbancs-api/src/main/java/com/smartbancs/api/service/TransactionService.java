@@ -1,6 +1,9 @@
 package com.smartbancs.api.service;
 
+import com.smartbancs.api.dto.BatchItemResult;
+import com.smartbancs.api.dto.BatchTransactionItem;
 import com.smartbancs.api.dto.LedgerEntryResponse;
+import com.smartbancs.api.dto.TransactionBatchResponse;
 import com.smartbancs.api.dto.TransactionResponse;
 import com.smartbancs.domain.entity.LedgerEntry;
 import com.smartbancs.domain.entity.Transaction;
@@ -21,6 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -113,6 +117,48 @@ public class TransactionService {
             metrics.recordFailure(type, amount, startNanos);
             throw ex;
         }
+    }
+
+    @Transactional
+    public TransactionBatchResponse createBatch(String batchId, List<BatchTransactionItem> items) {
+        List<BatchItemResult> results = new ArrayList<>(items.size());
+        int accepted = 0;
+        int rejected = 0;
+        for (int i = 0; i < items.size(); i++) {
+            BatchTransactionItem item = items.get(i);
+            try {
+                UUID debit = resolveAccount(item.debitAccountNumber());
+                UUID credit = resolveAccount(item.creditAccountNumber());
+                TransactionResponse tx = create(item.type(), item.amount(), item.currency(),
+                        debit, credit, item.idempotencyKey(), item.reference());
+                accepted++;
+                results.add(new BatchItemResult(i + 1, true, tx.id(), null));
+            } catch (RuntimeException ex) {
+                rejected++;
+                results.add(new BatchItemResult(i + 1, false, null, resolveMessage(ex)));
+            }
+        }
+        return new TransactionBatchResponse(batchId, items.size(), accepted, rejected, results);
+    }
+
+    private UUID resolveAccount(String accountNumber) {
+        if (accountNumber == null || accountNumber.isBlank()) {
+            return null;
+        }
+        return accountRepository.findByAccountNumber(accountNumber)
+                .map(AccountEntity::getId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "accountNumber not found: " + accountNumber));
+    }
+
+    private static String resolveMessage(RuntimeException ex) {
+        if (ex instanceof ResponseStatusException rse) {
+            String reason = rse.getReason();
+            if (reason != null && !reason.isBlank()) {
+                return reason;
+            }
+        }
+        return ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
     }
 
     private TransactionEntity processDeposit(UUID creditAccountId, BigDecimal amount, String currency,

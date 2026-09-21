@@ -23,7 +23,7 @@ Required deliverables: a technical document, a runnable **MVP** hosted in a Git 
 | Data access + PostgreSQL schema (Flyway) | Done |
 | REST CRUD: customers, accounts, transactions + transfers/ledger | Done |
 | AI async service | Pending |
-| ETL / data warehouse load | Pending |
+| ETL / data warehouse load | Done |
 | Observability (metrics, logs, traces) | Done |
 | Incident simulation + post mortem | Pending |
 | Final documentation + evidence | Pending |
@@ -46,6 +46,7 @@ RetoTCs/
 ├─ ai-service/             # AI recommendation service (mock), standalone
 ├─ db/                     # Raw DDL / DML scripts (challenge requirement)
 ├─ scripts/                # Load tests, seed data, evidence
+├─ etl/                    # ETL: transformación + ingesta por lote (ver sección ETL)
 ├─ docs/                   # Architecture, ADRs, incident, post mortem, defense
 ├─ observability/          # Prometheus, Tempo, Loki, Promtail + Grafana (provisioned)
 └─ docker-compose.yml      # Local MVP: PostgreSQL 16 + api + ai-service + observability stack
@@ -120,6 +121,64 @@ El script crea `scripts/evidencia/run-<timestamp>/` con 17 archivos (`00-estado-
 Para una **presentación pública paso a paso** (journey completo clic-a-clic en Swagger, enfocado en funciones y capas): [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md).
 
 > **Regla de negocio (DELETE):** `DELETE /customers/{id}` y `DELETE /accounts/{id}` devuelven `409 CONFLICT` cuando el recurso tiene dependencias: un cliente no se borra si todavía tiene cuentas, y una cuenta no se borra si tiene saldo distinto de 0 o historial de movimientos. Para demostrar el borrado, la demo crea un cliente temporal sin cuentas (flujo `204` → `404`) y muestra el `409` como protección esperada en `04-crear-cliente.txt`.
+
+## ETL / data warehouse load
+
+Proceso que recibe un **lote de datos crudos (no homologados)** desde un archivo,
+los limpia/estandariza y los ingesta como transacciones reales a través de la
+API, dejando además una **fact table** optimizada para análisis / modelos de IA.
+
+### Componentes
+
+- `etl/sample-data/raw_transactions.csv` — lote de muestra *sin procesar*:
+  montos con comas/decimales (`"1,250.50"`, `"750,00"`, `"$2,500.00"`), monedas en
+  minúsculas/espaciadas, fechas en formatos mixtos, nulos, montos negativos, tipos
+  desconocidos, filas duplicadas (idempotencia), cuentas inexistentes y un caso de
+  fondos insuficientes.
+- `etl/etl_transform.py` — ETL en **Python estándar** (sin dependencias externas),
+  por lo que no afecta el despliegue Terraform (no es un servicio nuevo).
+- `POST /transactions/batch` en `smartbancs-api` — endpoint de ingesta que resuelve
+  cada `accountNumber` al `accountId` interno y aplica las **mismas reglas** que
+  `POST /transactions` (validación, saldo, cuenta activa, idempotencia por ítem),
+  tolerando errores parciales: cada ítem se reporta como `accepted`/`rejected`.
+
+### Pipeline
+
+```
+EXTRACT  csv.DictReader + mapeo de columnas (headings sucios)
+  -> TRANSFORM  normalización: tipo, monto, ISO-4217, fecha ISO, nulos
+  -> DEDUP      idempotencyKey determinístico (evita duplicados)
+  -> RESOLVE    GET /accounts -> accountNumber -> accountId
+  -> LOAD       POST /transactions/batch (chunks de 50)
+  -> ANALYZE    transactions_fact.csv (unidades menores enteras) + etl_report.json
+```
+
+### Uso
+
+```bash
+# Solo transformar/reportar (sin publicar nada):
+python3 etl/etl_transform.py --input etl/sample-data/raw_transactions.csv --dry-run
+
+# Carga real contra el stack local:
+docker compose up -d            # postgres + api arriba
+python3 etl/etl_transform.py --input etl/sample-data/raw_transactions.csv
+```
+
+Salida (en `etl/output/`, no versionado):
+
+- `transactions_fact.csv` — un registro por **leg de ledger** (DEBIT/CREDIT) con
+  `amount_minor_units` entero (analítica/IA directa).
+- `etl_report.json` — conteos (`raw_rows`, `valid`, `dropped`, `duplicates`,
+  `sent`, `accepted`, `rejected`), detalle de descartes/rechazos y rutas de salida.
+
+Ejemplo de ejecución real (lote de muestra): 16 filas crudas → 11 válidas →
+10 analizables (1 duplicada omitida) → 9 publicadas → **8 aceptadas** y 1 rechazada
+por regla de negocio (`insufficient funds`), idempotencia confirmada en re-ejecución.
+
+> **Nota de calidad de datos:** el CSV debe ser *estructuralmente* válido (comas
+> internas entre comillas). La “suciedad” semántica (formatos, nulos, alias de tipos)
+> la resuelve el ETL; la ambigüedad estructural no es recuperable sin el dialecto
+> de origen.
 
 ## Run without Docker (development)
 

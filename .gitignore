@@ -58,3 +58,6 @@ crash.log
 
 # AWS local config (outside repo, but never tracked here)
 .aws/
+
+# ETL artifacts (generated outputs; raw sample data IS tracked)
+etl/output/
