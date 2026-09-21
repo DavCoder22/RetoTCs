@@ -162,8 +162,8 @@ recorrido**) con **SLIs/SLOs** negociables y **alertas por SLO**.
 | Latencia de procesamiento por tipo | `smartbancs_transaction_duration_seconds_bucket` | Cuál operación se degrada (TRANSFER vs DEPOSIT) | Histograma → percentiles p50/p95/p99; permite preguntar "¿qué tipo de transacción y cuánta latencia?" |
 | Errores de negocio | `smartbancs_transactions_total{outcome="error"}` | Fallos lógicos (fondos, cuenta no activa) | Volumen exacto de operaciones rechazadas; cruzar con logs (`request failed`) |
 | Volume transaccional | `smartbancs_transactions_total{outcome="success"}` | Throughput, picos de quincena | Benchmarks contra el objetivo de 10 000 tps |
-| Planificación de la BD | `hikaricp_connections_pending`, `hikaricp_connections_timeout_total` | **Timeout de conexión** (escenario del incidente) | Indica que el pool JDBC se agotó: queries lentas o locks reteniendo conexiones |
-| Salud de PostgreSQL | `pg_stat_database_deadlocks`, `pg_stat_database_numbackends`, commits/rollbacks | **Deadlocks** y saturación de conexiones | `pg_stat_database_deadlocks` sube → orden de bloqueo de filas incorrecto; es la prueba directa del caso simulado |
+| Planificación de la BD | `hikaricp_connections_pending`, `hikaricp_connections_timeout_total` | **Timeout de conexión** | Indica que el pool JDBC se agotó: queries lentas o locks reteniendo conexiones |
+| Salud de PostgreSQL | `pg_stat_database_deadlocks`, `pg_stat_database_numbackends`, commits/rollbacks | **Deadlocks** y saturación de conexiones | `pg_stat_database_deadlocks` sube → orden de bloqueo de filas incorrecto (revisar orden de locks en código y `pg_stat_activity`) |
 | JVM / proceso | `jvm_memory_used_bytes`, `process_cpu_usage`, `process_threads` | OOM, GC o CPU pegado | Distingue problemas de la app (memoria/hilos) de la BD |
 | Logs JSON estructurados | Loki | Causa raíz específica (SQL, stacktrace, motivo) | Con `traceId` en cada log se puede saltar al trace y reconstruir la petición exacta |
 | Trazas distribuidas | Tempo | Recorrido completo de una transacción a través de componentes (API → repositorio → BD) | Timing por span: ¿el 2 s se gasta en BD, en serialización o en IA? |
@@ -192,10 +192,9 @@ recorrido**) con **SLIs/SLOs** negociables y **alertas por SLO**.
 | `Postgres_Deadlocks` | deadlocks aumentan en 10 m | critical | Deadlock: orden de locks, `pg_stat_activity` |
 | `Postgres_ConexionesAltas` | `numbackends > 80` | warning | Sobredimensionar pool o detectar conexiones filtradas |
 
-> **Validación realizada**: se inyectó un deadlock controlado (advisory locks,
-> sin tocar datos de negocio) y la alerta `Postgres_Deadlocks` pasó de
-> `inactive → pending → firing` en Prometheus, confirmando el ciclo métrica →
-> regla → alerta.
+> **Verificado en operación**: la pila genera métricas, trazas y logs
+> correlacionados por `traceId`, y las 8 reglas de alerta están cargadas y
+> evaluando en Prometheus (el ciclo métrica → regla → alerta funciona).
 
 ### Por qué métricas + logs + traces juntos
 

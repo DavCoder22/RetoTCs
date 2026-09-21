@@ -66,7 +66,7 @@ una descripción del recorrido grabado.
 
 > Sugerencia de contenido (3–5 min): CRUD de clientes/cuentas → depósito →
 > transferencia con idempotencia → ledger e invariante contable → observabilidad
-> (Grafana/Prometheus: métricas, trazas y alerta de deadlock) → agente de IA
+> (Grafana/Prometheus: métricas, trazas y alertas SLO) → agente de IA
 > (recomendación recibida sin bloquear la transacción) → evidencia generada por
 > `./scripts/demo.sh`.
 
@@ -84,7 +84,6 @@ una descripción del recorrido grabado.
 | Ingesta por lotes (`POST /transactions/batch`) | ✅ Hecho |
 | Agente de IA asíncrono (no bloqueante) | 🟡 Funcional (mock + OpenRouter) |
 | Observabilidad (métricas · logs · trazas · alertas) | ✅ Hecho |
-| Incidente simulado + post mortem | ✅ Hecho |
 | Documentación final + evidencia | ✅ Hecho |
 | Video demostrativo | 🟡 Pendiente de publicar enlace (§2) |
 
@@ -342,9 +341,8 @@ Se levanta con el mismo `docker compose` y queda integrado **Prometheus**
 | Trazas y logs | Correlacionadas por `traceId`; en Grafana → Explore saltas del log a la traza en Tempo |
 | Alertas SLO | 8 reglas en `observability/prometheus/rules.yml`: instancia caída, latencia, tasa de error, timeouts/esperas del pool Hikari, deadlocks y conexiones de PostgreSQL |
 
-**Validado en vivo:** pico de carga simulado y un deadlock controlado que elevó
-`pg_stat_database_deadlocks` y disparó la alerta **`Postgres_Deadlocks`** a
-estado `firing` en Prometheus.
+**Validado en vivo:** la pila genera métricas, trazas y logs correlacionados
+por `traceId`; las 8 reglas de alerta están cargadas y evaluando en Prometheus.
 
 Detalle completo (arquitectura, instrumentación, queries y troubleshooting):
 [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md).
@@ -454,9 +452,8 @@ uvicorn app.main:app --app-dir ai-service --host 0.0.0.0 --port 8081
 | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Documento técnico: arquitectura, decisiones justificadas, integración con `Bancs`, manejo del modelo de IA y estado de implementación |
 | [`docs/arquitectura.puml`](docs/arquitectura.puml) | Diagrama profesional **PlantUML** (componentes + secuencia de la transferencia) |
 | [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | Estrategia de observabilidad: SLIs/SLOs, alertas, verificación en vivo y troubleshooting |
-| [`docs/INCIDENTE_Y_POST_MORTEM.md`](docs/INCIDENTE_Y_POST_MORTEM.md) | Incidente simulado, acciones inmediatas, escalamiento y plantilla de post mortem |
 | [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | Declaración de uso de IA (herramientas, componentes y verificación humana) |
-| [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | Guía de demostración paso a paso con Swagger |
+| [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | Manual de usuario: cómo probar cada sección de la solución con Swagger |
 
 ## 14. Modelo de dominio
 
@@ -491,7 +488,6 @@ El núcleo de negocio se organiza por **contextos acotados**:
 | Instrucciones | Este README · guía en [`docs/GUIA_DEMO_SWAGGER.md`](docs/GUIA_DEMO_SWAGGER.md) | ✅ Listo |
 | Evidencia de funcionamiento | `scripts/` (`./scripts/demo.sh`) y capturas del stack | ✅ Listo |
 | Video demostrativo | [Enlace en §2](#2-video-demostrativo) | 🟡 Pendiente de publicar |
-| Incidente + post mortem | [`docs/INCIDENTE_Y_POST_MORTEM.md`](docs/INCIDENTE_Y_POST_MORTEM.md) | ✅ Listo |
 | Observabilidad y alertas | [`docs/OBSERVABILIDAD.md`](docs/OBSERVABILIDAD.md) | ✅ Listo |
 | Declaración de uso de IA | [`docs/DECLARACION_IA.md`](docs/DECLARACION_IA.md) | ✅ Listo |
 

@@ -1,17 +1,30 @@
-# Guía de demostración en Swagger (presentación pública)
+# Manual de usuario — SmartBancs (guía de pruebas por secciones)
 
-> Foco: **funciones y capas**. Cada paso de este recorrido es una *función* de
-> negocio identificable (método HTTP + ruta) y muestra qué *capa* la resuelve:
-> **Controller** (orquesta HTTP) → **Service** (regla de negocio) → **Repository**
-> (persistencia de datos). Nada se explica por "clic"; todo se explica por
-> "qué función se ejecutó y en qué capa vive su regla".
+> Manual estandarizado para **probar cada sección** de la solución con Swagger
+> (o `curl`). Cada sección del reto tiene su **objetivo**, sus **pasos** y su
+> **resultado esperado**. Todas las secciones son independientes: se pueden
+> validar una a una, en el orden que prefieras.
 
-## 0. Escenario reproducible
+- **0.** Preparar el entorno
+- **1.** Clientes (CRUD)
+- **2.** Cuentas (apertura + reglas)
+- **3.** Transacciones (depósito y transferencia)
+- **4.** Ledger e invariante contable
+- **5.** ETL e ingesta por lotes
+- **6.** Agente de IA (recomendaciones)
+- **7.** Observabilidad (Grafana/Prometheus)
+- **8.** Despliegue en AWS (EC2 + Docker)
+- **9.** Mapa rápido de pruebas
 
-Prerrequisito: el stack corriendo.
+---
+
+## 0. Preparar el entorno
+
+Levanta el stack (requiere Docker):
 
 ```bash
 docker compose up --build -d
+docker compose ps          # todo en estado healthy
 ```
 
 Para números predecibles en vivo, resetea la base:
@@ -20,45 +33,37 @@ Para números predecibles en vivo, resetea la base:
 docker compose down -v && docker compose up --build -d
 ```
 
-Recursos usados en la demo:
+Recursos disponibles:
 
 | Recurso | URL |
 | --- | --- |
 | Swagger UI de la API | `http://localhost:8080/swagger-ui.html` |
 | OpenAPI spec (JSON) | `http://localhost:8080/v3/api-docs` |
-| Swagger UI del AI service | `http://localhost:8081/swagger-ui.html` |
-| Actuator / health | `http://localhost:8080/actuator/health` |
+| Health de la API | `http://localhost:8080/actuator/health` |
+| **AI service** (FastAPI, Swagger integrado) | `http://localhost:8081/docs` |
+| Health del AI service | `http://localhost:8081/health` |
+| Prometheus (métricas) | `http://localhost:9090` |
+| Grafana (dashboard + alertas) | `http://localhost:3333` |
 
-**Cómo leer Swagger UI**: el panel izquierdo agrupa las funciones por
+**Cómo usar Swagger:** el panel izquierdo agrupa las operaciones por
 *controller* (`customer-controller`, `account-controller`, `transaction-controller`,
-`health-controller`). Cada bloque es una función con su firma HTTP completa
-(método + ruta + parámetros). La API expone 17 operaciones.
+`health-controller`). Los cuerpos vienen **precargados** (los DTOs declaran
+`example`), así pulsa **Try it out → Execute** sin copiar/pegar. Solo cambia los
+**ids dinámicos** (`customer_id`, `account_id`) al encadenar pasos. El `AI
+service` expone su documentación interactiva en **`/docs`** (FastAPI).
 
-**Los cuerpos vienen PRECARGADOS**: los DTOs declaran `example` y *required* en la
-spec, así que al pulsar **Try it out** ya aparece el JSON de la plantilla, sin
-copiar/pegar. Solo se reemplazan los **ids dinámicos** del propio journey
-(`customer_id`, `account_id`) cuando quieras encadenar pasos; los valores que
-vienen por defecto apuntan a datos seed y funcionan de inmediato.
-
-## El recorrido (historia)
-
-> *"SmartBancs da de alta a una clienta PREMIUM, le abre una cuenta, le abona su
-> salario (DEPOSIT), la clienta transfiere una parte de su dinero, y el banco
-> intenta operaciones que la lógica de negocio rechaza: abrir una cuenta con
-> saldo, transferir sin fondos y borrar registros con dependencias."*
-
-Cada paso =\> una función. Antes de ejecutar cada uno, señala en pantalla el
-bloque (controller/service) que lo resuelve.
+> **Datos de seed:** hay clientes/cuentas precargados; si un `idempotencyKey` o
+> `accountNumber` ya se usó en una ejecución previa, cámbialo y vuelve a
+> intentar (2 respuestas posibles: `201` nuevo o el `200`/`409` repetido de la
+> primera).
 
 ---
 
-## Paso 1 — Crear un cliente (`POST /customers`)
+## 1. Clientes (CRUD)
 
-**Función:** alta de identidad de cliente.
-**Capas:** `CustomerController.create` → `CustomerService.create` (email único,
-segmento válido) → `customerRepository.save`.
+**Objetivo:** comprobar el ciclo completo de vida de un cliente y sus reglas.
 
-En Swagger UI: `POST /customers` → **Try it out** → reemplaza el cuerpo:
+**1.1 Crear** — `POST /customers`
 
 ```json
 {
@@ -67,58 +72,56 @@ En Swagger UI: `POST /customers` → **Try it out** → reemplaza el cuerpo:
   "segment": "PREMIUM"
 }
 ```
+**Esperado:** `201 Created` con un `id`.
 
-**Execute** → `201 Created`. Toma el `id` de la respuesta (**customer_id**).
+**1.2 Listar / consultar** — `GET /customers` y `GET /customers/{id}` → `200`.
 
-*Para decir en público:* "El controlador aceptó el JSON, pero la decisión de
-crearlo la tomó el servicio: es la capa que valida y escribe. En Java cada capa
-es una clase = una función con responsabilidad única."
+**1.3 Duplicado** — repetir el `POST` anterior → `409` por email único.
+
+**1.4 Modificar** — `PUT /customers/{id}` → `200`.
+
+**1.5 Borrado protegido** — `DELETE /customers/{id}` de un cliente **con
+cuentas** → `409` (no rompe el historial).
+
+**1.6 Contraste** — crear un cliente temporal **sin cuentas** y borrarlo →
+`204`; luego `GET /customers/{id}` → `404`.
 
 ---
 
-## Paso 2 — Abrir una cuenta con saldo 0 (`POST /accounts`)
+## 2. Cuentas (apertura + reglas)
 
-**Función:** apertura de cuenta.
-**Capas:** `AccountController.create` → `AccountService.create`.
+**Objetivo:** comprobar que una cuenta nace con saldo 0 y que el saldo solo
+proviene de transacciones.
 
-Cuerpo (reemplaza `<customer_id>`):
+**2.1 Abrir cuenta** — `POST /accounts` (reemplaza `<customer_id>`):
 
 ```json
 {
   "customerId": "<customer_id>",
-  "accountNumber": "4651DEMO00000000001",
+  "accountNumber": "4651DEMO00000000002",
   "currency": "PEN",
   "balance": 0,
   "dailyTransferLimit": 10000,
   "status": "ACTIVE"
 }
 ```
+**Esperado:** `201 Created` con `account_id`.
 
-**Execute** → `201 Created`. Copia el **account_id**.
+**2.2 Regla: saldo inicial ≠ 0** — repetir con `"balance": 1000` → `422`
+"initial balance must be justified by a DEPOSIT transaction".
 
-> Nota para el presentador: `accountNumber` ya viene precargado
-> (`4651DEMO00000000001`). Si repites la demo en vivo, cambia ese número por uno
-> nuevo (la cuenta no se puede duplicar).
+**2.3 Cuenta duplicada** — repetir el mismo `accountNumber` → `409`.
 
-### Demostración de regla de negocio (el "no")
-
-Repite el mismo `POST /accounts` pero con `"balance": 1000` → **`422`**
-`"initial balance must be justified by a DEPOSIT transaction: create the account
-with balance 0 and register a deposit"`.
-
-*Para decir en público:* "El `422` llega desde la función del servicio, no desde
-la interfaz. Aunque el usuario envíe un saldo inicial, la regla lo rechaza: el
-saldo de una cuenta nace siempre de una transacción registrada."
+**2.4 Consultar saldo** — `GET /accounts/{account_id}` → `balance: 0` antes de
+cualquier transacción.
 
 ---
 
-## Paso 3 — Depósito (`POST /transactions`, type `DEPOSIT`)
+## 3. Transacciones (depósito y transferencia)
 
-**Función:** registrar un abono y asentarlo en el ledger.
-**Capas:** `TransactionController.create` → `TransactionService.processTransfer`
-→ repo (inserción atómica de transacción + asiento de ledger).
+**Objetivo:** comprobar abono, transferencia, idempotencia y errores de regla.
 
-Cuerpo:
+**3.1 Depósito** — `POST /transactions` (reemplaza `<account_id>`):
 
 ```json
 {
@@ -130,44 +133,12 @@ Cuerpo:
   "reference": "Depósito inicial"
 }
 ```
+**Esperado:** `201`, `status: SUCCEEDED`.
 
-**Execute** → `201`, `status: SUCCEEDED`. Copia el **transaction_id**.
+**3.2 Idempotencia** — re-ejecutar el **mismo cuerpo** → el **mismo**
+`transaction_id` y **sin duplicar** el asiento.
 
-### Idempotencia (repetir sin duplicar)
-
-Re-ejecuta el **mismo cuerpo** (mismo `idempotencyKey`) → devuelve el **mismo
-`transaction_id`** (200) y **no duplica** el asiento.
-
-*Para decir en público:* "La función es *idempotente*: mismo insumo, mismo
-resultado. Un tema crítico para una API de pagos: si la red reintenta, el banco
-no cobra dos veces."
-
----
-
-## Paso 4 — Leer el ledger (`GET /transactions/{id}/ledger`)
-
-**Función:** leer los asientos de una transacción.
-**Capas:** `TransactionController.ledger` → repo (solo lectura de datos).
-
-`GET /transactions/{transaction_id}/ledger` → devuelve un asiento
-`{"type": "CREDIT", "amount": 1500}`.
-
-Luego `GET /accounts/{account_id}` → `balance: 1500`.
-
-*Para decir en público:* "El saldo de la cuenta **es** la suma de sus asientos.
-Aquí el saldo (1500) coincide con el asiento CREDIT del depósito: el invariante
-contable se cumple. Los datos no se escriben 'a mano': se derivan del ledger."
-
----
-
-## Paso 5 — Transferencia y su error (`POST /transactions`, type `TRANSFER`)
-
-**Función:** transferir fondos entre dos cuentas.
-**Capas:** `TransactionService` ejecuta la regla completa: verificar fondos,
-mismo conductor (debit/credit), límite diario y asientos dobles.
-
-Primero crea un destinatario (repite Paso 1 y Paso 2 para un `RETAIL`) o usa una
-cuenta seed existente. Luego:
+**3.3 Transferencia** — crea un destinatario (sección 1+2) y envía:
 
 ```json
 {
@@ -179,73 +150,153 @@ cuenta seed existente. Luego:
   "idempotencyKey": "presentacion-transf-01"
 }
 ```
+**Esperado:** `201 SUCCEEDED`; el ledger genera **dos asientos** (DEBIT/CREDIT).
 
-**Execute** → `201 SUCCEEDED`. Revisa `GET /transactions/{id}/ledger` →
-**dos asientos**: un `DEBIT` en origen y un `CREDIT` en destino.
+**3.4 Error: fondos insuficientes** — repetir con `"amount": 999999` → `422`
+`insufficient funds`.
 
-### Error controlado
-
-Repite la transferencia con `"amount": 999999` → **`422`**
-`"insufficient funds"`.
-
-*Para decir en público:* "Una transferencia no es dos UPDATEs sueltos: es una
-sola función que escribe dos asientos en una transacción. La regla del saldo y
-los asientos dobles viven en el Service. Eso es lo que hace consistente al dato."
+**3.5 Cuenta inactiva** — usar una cuenta `BLOCKED`/`CLOSED` en una
+transferencia → `422` (cuenta no operativa).
 
 ---
 
-## Paso 6 — Borrado protegido (`DELETE`, reglas de dependencia)
+## 4. Ledger e invariante contable
 
-**Funciones:** `CustomerService.delete` y `AccountService.delete`.
-**Capas:** Service (no acepta destruir un recurso con dependencias).
+**Objetivo:** comprobar que el saldo **se deriva** de los asientos (invariante
+contable: todo DEBIT tiene su CREDIT).
 
-En orden:
+**4.1** `GET /transactions/{transaction_id}/ledger` → lista de asientos
+(`{"type","amount","accountId",...}`). En un depósito: 1 asiento `CREDIT`.
 
-1. `DELETE /customers/{customer_id}` (la clienta tiene cuentas) → **`409`**
-   `"customer cannot be deleted while it still has accounts"`.
-2. `DELETE /accounts/{account_id}` (la cuenta tiene saldo e historial) → **`409`**.
+**4.2** `GET /accounts/{account_id}` → el `balance` **coincide** con la suma de
+sus asientos (ej.: tras el depósito de 1500 → `balance: 1500`).
 
-### Contraste: el borrado que sí funciona
-
-Crea un **cliente temporal sin cuentas** (Paso 1) y borra su detalle:
-
-- `DELETE /customers/{temporal_id}` → **`204`** (sin cuerpo).
-- `GET /customers/{temporal_id}` → **`404`** `"customer not found"`.
-
-*Para decir en público:* "DELETE existe, pero es una función con reglas: no se
-borra un cliente con cuentas ni una cuenta con historial, porque eso rompería el
-ledger. El ciclo completo del CRUD (crear → listar → borrar → ya no existe) se
-ve con el cliente temporal."
+**4.3** En una transferencia: el ledger muestra **2 asientos**
+(DEBIT en origen + CREDIT en destino) con montos idénticos → la contabilidad
+de partida doble se mantiene.
 
 ---
 
-## Paso 7 — Cierre: la aplicación, no el CRUD
+## 5. ETL e ingesta por lotes
 
-1. `GET /health` → `200` (función de monitoreo).
-2. Abre `http://localhost:8081/swagger-ui.html`: el **AI service** es un
-   microservicio independiente con su propio contrato (`/internal/...`), que
-   consume la API sin bloquear las transacciones (uno de los requerimientos del
-   reto: las recomendaciones de IA nunca bloquean el flujo principal).
+**Objetivo:** comprobar la limpieza/normalización de un lote crudo y su envío a
+la API. Requiere el stack levantado.
+
+**5.1 Ver el reporte sin publicar nada:**
+
+```bash
+python3 etl/etl_transform.py --input etl/sample-data/raw_transactions.csv --dry-run
+```
+
+**5.2 Cargar el lote de verdad:**
+
+```bash
+python3 etl/etl_transform.py --input etl/sample-data/raw_transactions.csv
+```
+
+**5.3 Resultado esperado:** en `etl/output/` quedan
+`transactions_fact.csv` (una fila por leg del ledger, `amount_minor_units`
+entero) y `etl_report.json` con conteos (`raw_rows`, `valid`, `dropped`,
+`duplicates`, `sent`, `accepted`, `rejected`).
+
+**5.4 Con el lote de muestra:** 16 crudas → 11 válidas → 10 analizables (1
+duplicada omitida) → 9 publicadas → **8 aceptadas** + 1 rechazada por
+`insufficient funds`. Al re-ejecutar no duplica (idempotencia por
+`idempotencyKey` determinístico).
+
+> Probar el endpoint directamente: `POST /transactions/batch` con el JSON de
+> un *payload* de 1..n transacciones → `200` con conteos `accepted`/`rejected`
+> por ítem.
 
 ---
 
-## Resumen para la audiencia
+## 6. Agente de IA (recomendaciones)
 
-| Paso | Función (endpoint) | Capa que decide | Concepto |
-| --- | --- | --- | --- |
-| 1 | `POST /customers` | Controller → Service → Repo | Responsabilidad única por capa |
-| 2 | `POST /accounts` | Service | Regla de negocio (saldo inicial = 0) |
-| 3 | `POST /transactions` (DEPOSIT) | Service | Transacción atómica + idempotencia |
-| 4 | `GET /transactions/{id}/ledger` | Repo | Lectura de datos / invariante contable |
-| 5 | `POST /transactions` (TRANSFER) | Service | Asientos dobles, fondos, límite diario |
-| 6 | `DELETE /customers/{id}` | Service | Reglas de dependencia (no destruir el ledger) |
-| 7 | `GET /health` + AI service | Infraestructura | Aplicación en microservicios |
+**Objetivo:** comprobar que el agente de IA genera recomendaciones **sin
+bloquear** el flujo transaccional (requisito del reto).
 
-## Hallazgos registrados
+| Endpoint | URL | Para qué |
+| --- | --- | --- |
+| Documentación (FastAPI) | `http://localhost:8081/docs` | Probar el contrato directo |
+| Health | `http://localhost:8081/health` | Verificar que está vivo |
+| Métricas | `http://localhost:8081/metrics` | Ver `smartbancs_ai_*` |
+| Contrato interno | `POST /internal/recommendations` | Generar una recomendación manual |
 
-- Los cuerpos de `POST /customers`, `POST /accounts` y `POST /transactions` vienen
-  precargados con ejemplos funcionales (DTOs con `@Schema(example)`) y los campos
-  obligatorios quedan marcados con `*` en Swagger, alineando spec y validación.
-- Los `idempotencyKey` permiten repetir segmentos de la demo sin duplicar datos.
-- El API bloquea el borrado con si el recurso tiene dependencias porque la
-  destrucción de historial rompería la justificación del saldo en el ledger.
+**6.1** `GET /health` del agente → `200` (`{"status":"up",...}`).
+
+**6.2** En Swagger del agente (`/docs`): `POST /internal/recommendations` con un
+contexto transaccional → `200` con `source: "mock"` (sin `OPENROUTER_API_KEY`)
+o `source: "openrouter"` (con clave).
+
+**6.3 Desde la API** — `GET /recommendations?customerId=<customer_id>&limit=20`
+→ lista las recomendaciones generadas asíncronamente para ese cliente.
+
+**6.4 No bloqueo**: dispara un depósito/transferencia y verifica en Tempo que
+la traza de `/transactions` termina < 2 s **sin** spans de IA dentro (el
+worker asíncrono corre aparte).
+
+---
+
+## 7. Observabilidad (Grafana/Prometheus)
+
+**Objetivo:** comprobar las 4 señales (métricas, logs, trazas, alertas).
+
+**7.1 Métricas** — `http://localhost:9090/targets` → los 4 targets en `UP`
+(api, ai-service, postgres-exporter, prometheus). En *Graph* consulta
+`smartbancs_transactions_total` tras una transacción (sección 3).
+
+**7.2 ALERTAS** — *Alerts* en Prometheus → **8 reglas** cargadas y evaluando.
+
+**7.3 Dashboard** — Grafana (`http://localhost:3333`, d. admin/admin) →
+dashboard **"SmartBancs – Observabilidad"**: paneles de negocio (transacciones,
+latencia), JVM y PostgreSQL.
+
+**7.4 Trazas** — Grafana → **Explore → Tempo**: busca el `traceId` de una
+transacción y observa los spans (API → repositorio → BD).
+
+**7.5 Logs** — Grafana → **Explore → Loki**: logs JSON con `traceId`; salta
+hasta la traza en Tempo (correlación log↔traza).
+
+---
+
+## 8. Despliegue en AWS (EC2 + Docker)
+
+**Objetivo:** comprobar el despliegue en AWS (Terraform → **instancias EC2** +
+**imágenes Docker**) y el **acceso público a la API**.
+
+**8.1** Localiza la URL de la instancia que lanza el workflow de CI:
+
+```bash
+cd terraform && terraform output
+# public_ip       = "54.x.x.x"
+# swagger_url     = "http://54.x.x.x:8080/swagger-ui.html"
+```
+
+**8.2** Abre `swagger_url` desde cualquier navegador → Swagger de la API en
+AWS. Repite alguna sección de este manual (ej. 3.1 Depósito) sobre esa URL.
+
+**8.3** `GET http://<public_ip>:8080/actuator/health` → `200`.
+
+> Las imágenes son las mismas del MVP local (ECR + `docker compose`): lo que
+> pruebas en local funciona igual en la EC2.
+
+---
+
+## 9. Mapa rápido de pruebas
+
+| Sección | Endpoint / comando | Resultado esperado |
+| --- | --- | --- |
+| Clientes | `POST /customers` → `GET /customers/{id}` → `DELETE` | `201` · `200` · `204`/`409` |
+| Cuentas | `POST /accounts` (saldo 0) | `201`; con saldo ≠ 0 → `422` |
+| Transacciones | `POST /transactions` DEPOSIT/TRANSFER | `201 SUCCEEDED`; repetir = mismo id |
+| Ledger | `GET /transactions/{id}/ledger` | Asientos DEBIT/CREDIT = saldo |
+| ETL | `python3 etl/etl_transform.py ...` | `transactions_fact.csv` + `etl_report.json` |
+| IA | `GET /recommendations?customerId=...` | Recomendaciones sin bloquear |
+| Observabilidad | Grafana :3333 · Prometheus :9090 | 4 targets `UP` · 8 alertas evaluando |
+| AWS | `http://<public_ip>:8080/swagger-ui.html` | API desplegada con imágenes Docker |
+
+---
+
+*Manual alineado con el README (§3–§10) y con las secciones del reto. El
+script `./scripts/demo.sh` genera además evidencia reproducible de los flujos
+principales.*

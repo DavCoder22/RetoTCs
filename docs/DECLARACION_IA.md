@@ -32,7 +32,7 @@
   agente de IA) se diseñó con el **agente de planificación de opencode**.
 - **Redacción de documentación**: los documentos técnicos se redactaron con
   apoyo del asistente y fueron **revisados y corregidos por el candidato**
-  (arquitectura, decisiones, post mortem, observabilidad).
+  (arquitectura, decisiones, observabilidad).
 
 ## En qué componentes / entregables se aplicó
 
@@ -45,7 +45,7 @@
    punta: transacción → métrica → alerta, logs con `traceId` y traza en Tempo,
    y petición al agente de IA con sus métricas scrapedas por Prometheus.
 2. **Docencia y evidencia**: documentación en `docs/` (ARQUITECTURA,
-   OBSERVABILIDAD, INCIDENTE_Y_POST_MORTEM, GUIA_DEMO_SWAGGER), README en
+   OBSERVABILIDAD, GUIA_DEMO_SWAGGER), README en
    español, scripts de demo y evidencia de funcionamiento.
 3. **No se usó IA para**: decisiones de seguridad (credenciales, secretos),
    cálculos contables del ledger, ni para generar datos financieros falsos.
