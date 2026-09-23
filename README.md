@@ -283,7 +283,7 @@ docker compose down            # apaga servicios
 docker compose down -v         # apaga y borra los volúmenes (datos)
 ```
 
-> **Docker rootless (Linux).** Dos ajustes posibles:
+> **Docker rootless (Linux).** Ajustes posibles:
 >
 > **1. `promtail` no encuentra el daemon** (error `creating mount source path
 > '/var/lib/docker/containers'`): en rootless el socket y los contenedores no
@@ -322,6 +322,30 @@ docker compose down -v         # apaga y borra los volúmenes (datos)
 > TCP externo muere (`docker run --rm python:3.12-alpine python -c "import
 > socket; socket.setdefaulttimeout(6); socket.create_connection(('1.1.1.1',
 > 443))"` → `TimeoutError`), es este problema y no del stack.
+>
+> **3. Build de la API roto: Maven no resuelve `repo.maven.apache.org`.**
+> Síntoma: el `docker compose build` del módulo Java muere con
+> `Unknown host repo.maven.apache.org: Temporary failure in name resolution`.
+> Con `pasta` el DNS interno `10.0.2.3` de rootless a veces no reenvía. La
+> solución es fijar DNS públicos en el daemon rootless:
+>
+> ```json
+> // ~/.config/docker/daemon.json
+> { "dns": ["8.8.8.8", "8.8.4.4"] }
+> ```
+>
+> ```bash
+> systemctl --user restart docker
+> ```
+>
+> **4. WARN `buildx Docker CLI plugin not found`.** docker compose cae al
+> builder clásico. Instala buildx como plugin de usuario (sin sudo):
+>
+> ```bash
+> mkdir -p ~/.docker/cli-plugins
+> curl -sL https://github.com/docker/buildx/releases/latest/download/buildx-$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4).linux-amd64 \
+>   -o ~/.docker/cli-plugins/docker-buildx && chmod +x ~/.docker/cli-plugins/docker-buildx
+> ```
 
 ## 8. Agente de IA (recomendaciones)
 
