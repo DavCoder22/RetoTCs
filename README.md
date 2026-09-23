@@ -240,6 +240,10 @@ curl -s http://localhost:8081/health               # Agente de IA (FastAPI)
    dashboard **"SmartBancs – Observabilidad"**; métricas en `:9090`, trazas en
    `:3200`, logs en `:3100`.
 9. **Evidencia reproducible**: `./scripts/demo.sh` (ver §11).
+10. **Prueba de estrés (k6)**: `./scripts/stress.sh` lanza 10.000
+    transferencias de 0.01 tras el CRUD completo y las envía a Prometheus
+    (remote write); observables en Grafana (`k6_*`). Detalle en
+    [`docs/GUIA_DEMO_SWAGGER.md §9`](docs/GUIA_DEMO_SWAGGER.md).
 
 **5.1 Puertos de la solución (servicios y observabilidad):**
 

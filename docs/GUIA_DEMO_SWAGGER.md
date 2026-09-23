@@ -282,7 +282,62 @@ AWS. Repite alguna sección de este manual (ej. 3.1 Depósito) sobre esa URL.
 
 ---
 
-## 9. Mapa rápido de pruebas
+## 9. Prueba de estrés con k6 (resiliencia)
+
+**Objetivo:** demostrar resiliencia bajo carga tras el flujo completo CRUD
+(crear → editar → eliminar) de las entidades Java, con **10.000 transferencias
+de 0.01** entre dos cuentas y los resultados **visibles en Prometheus/Grafana**.
+
+El runner `./scripts/stress.sh` orquesta todo el flujo en este orden:
+
+1. **Health checks** (`/actuator/health`).
+2. **CRUD de entidades**: `POST /customers` → `PUT /customers/{id}` → `POST
+   /accounts` → `PUT /accounts/{id}` → `DELETE /accounts/{id}` → `DELETE
+   /customers/{id}` (mismos endpoints que aparecen en este Swagger).
+3. **Fondos**: deposita el monto necesario si la cuenta origen no cubre el
+   total (garantiza que las 10.000 no fallen por `422`).
+4. **k6** (`scripts/k6/transfers.js`): cada iteración es un `POST
+   /transactions` con `idempotencyKey` única, así las 10.000 generan asientos
+   **reales** en el ledger (sin duplicados).
+5. **Remote write**: las métricas `k6_*` se envían a Prometheus
+   (`/api/v1/write`, ya habilitado con `--web.enable-remote-write-receiver`).
+
+**9.1** Ejecutar (local o contra AWS):
+
+```bash
+# Local
+./scripts/stress.sh
+
+# Contra la instancia AWS (resultados visibles en su Grafana :3333)
+API=http://<public_ip>:8080 PROM=http://<public_ip>:9090 ./scripts/stress.sh
+
+# Con STRESS=1, la demo completa (demo.sh) termina lanzando la prueba de estrés
+STRESS=1 PROM=http://<public_ip>:9090 ./scripts/demo.sh
+```
+
+Detalles configurables: `AMOUNT=0.01`, `TOTAL=10000`, `VUS=50`,
+`DEBIT_ACCOUNT`/`CREDIT_ACCOUNT`. Evidencia en `scripts/evidencia/stress-*`.
+
+**9.2** Observar en Grafana (`:3333` → Explore → Prometheus):
+
+| Qué ver | Query (filtro por `testid`) |
+| --- | --- |
+| Carga | `sum(rate(k6_http_reqs_total{testid="<TEST_ID>"}[1m]))` |
+| Latencia p99 | `k6_http_req_duration_p99{testid="<TEST_ID>"}` |
+| Errores | `k6_http_req_failed_rate{testid="<TEST_ID>"}` |
+| Usuarios concurrentes | `k6_vus{testid="<TEST_ID>"}` |
+| Respuesta del servidor | `increase(http_server_requests_seconds_count{uri="/transactions"}[1m])` |
+| Transacciones asentadas | `smartbancs_transaction_amount_count{type="TRANSFER"}` |
+| BD bajo carga | `pg_stat_database_xact_commit` |
+
+> Importa el dashboard oficial de k6 (Grafana.com **ID 13039**) en
+> `http://<host>:3333/dashboards/import` y filtra por `testid` para ver solo la
+> corrida. Las 10.000 se cruzan en Grafana por dos lados: **cliente (k6)** y
+> **servidor (Micrometer + Postgres)**.
+
+---
+
+## 10. Mapa rápido de pruebas
 
 | Sección | Endpoint / comando | Resultado esperado |
 | --- | --- | --- |
@@ -293,6 +348,7 @@ AWS. Repite alguna sección de este manual (ej. 3.1 Depósito) sobre esa URL.
 | ETL | `python3 etl/etl_transform.py ...` | `transactions_fact.csv` + `etl_report.json` |
 | IA | `GET /recommendations?customerId=...` | Recomendaciones sin bloquear |
 | Observabilidad | Grafana :3333 · Prometheus :9090 | 4 targets `UP` · 8 alertas evaluando |
+| Resiliencia (k6) | `./scripts/stress.sh` (10k transacciones de 0.01) | Métricas `k6_*` en Prometheus · Grafana Explore |
 | AWS | `http://<public_ip>:8080/swagger-ui.html` | API desplegada con imágenes Docker |
 
 ---

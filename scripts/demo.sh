@@ -7,8 +7,9 @@
 #   01-health.txt         health checks (API, AI, PostgreSQL)
 #   02-seed-customers.txt seed data: clientes
 #   03-seed-accounts.txt  seed data: cuentas
-#   04-crear-cliente.txt  CRUD cliente: crear/listar/get + DELETE (204/404) + regla 409
+#   04-crear-cliente.txt  CRUD cliente: crear/listar/get + PUT edición + DELETE (204/404) + regla 409
 #   05-crear-cuenta.txt   POST /accounts (saldo inicial 0)
+#   05b-edicion-cuenta    PUT /accounts/{id} (edición del límite diario)
 #   06-deposito.txt       DEPOSIT + justificación (asiento CREDIT del ledger == saldo)
 #   07-saldos-antes.txt   saldos previos (cuenta seed + cuenta nueva)
 #   08-transferencia.txt  POST /transactions (TRANSFER + idempotencyKey)
@@ -208,6 +209,20 @@ EOF
     echo "HTTP $HTTP | ${TIME}s"
     python3 -m json.tool "$BODY"
     [ -n "$CUSTOMER_ID" ] || { echo "FALLO: no se obtuvo customerId" >&2; exit 1; }
+
+    echo
+    echo "## 04h. PUT /customers/{id} — edición del cliente principal"
+    cat > "$TMP/customer-edit.json" <<EOF
+{
+  "fullName": "Cliente Demo ${STAMP} (editado)",
+  "email": "demo.${STAMP}@example.com",
+  "segment": "PREMIUM"
+}
+EOF
+    call PUT /customers/$CUSTOMER_ID "$TMP/customer-edit.json"
+    echo "HTTP $HTTP | ${TIME}s"
+    echo "segmento_reflejado=$(jget segment)"
+    python3 -m json.tool "$BODY"
 } > "$EVR/04-crear-cliente.txt"
 ok "$EVR/04-crear-cliente.txt"
 
@@ -228,6 +243,11 @@ call POST /accounts "$TMP/account.json"
 ACCOUNT_ID="$(jget id)"
 format 05-crear-cuenta.txt "POST /accounts (balance inicial 0)"
 [ -n "$ACCOUNT_ID" ] || { echo "FALLO: no se obtuvo accountId" >&2; exit 1; }
+
+step "05b) Edición de cuenta (PUT /accounts/{id})"
+printf '{"dailyTransferLimit": 5000.00}' > "$TMP/account-update.json"
+call PUT /accounts/$ACCOUNT_ID "$TMP/account-update.json"
+format 05b-edicion-cuenta.txt "PUT /accounts (límite diario 5000.00)"
 
 # ---------------------------------------------------------------------------
 step "06) Depósito inicial (DEPOSIT) + justificación en el ledger"
@@ -490,3 +510,15 @@ echo "Demo completada. Evidencia en:"
 echo "  $EVR"
 echo "Abrir Swagger UI: http://localhost:8080/swagger-ui.html"
 echo "====================================================="
+
+# ---------------------------------------------------------------------------
+if [ "${STRESS:-0}" = "1" ]; then
+    # Resiliencia: tras el CRUD completo (crear/editar/eliminar), corre la
+    # prueba de estrés k6 (N transferencias de 0.01) con salida a Prometheus.
+    step "17) Prueba de estrés (k6) — resiliencia (STRESS=1)"
+    echo "API=$API PROM=${PROM:-} TOTAL=${K6_TOTAL:-10000} VUS=${K6_VUS:-50}"
+    API="$API" PROM="${PROM:-}" TOTAL="${K6_TOTAL:-10000}" \
+        VUS="${K6_VUS:-50}" TEST_ID="demo-stress-${STAMP}" \
+        K6_CMD="${K6_CMD:-}" "$ROOT/scripts/stress.sh"
+    ok "Prueba de estrés completada (ver scripts/evidencia/stress-*)"
+fi
