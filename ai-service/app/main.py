@@ -29,14 +29,24 @@ logger = logging.getLogger("smartbancs-ai")
 API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 MODEL = os.getenv("AI_MODEL", "moonshotai/kimi-k2.6").strip() or "moonshotai/kimi-k2.6"
 TIMEOUT = float(os.getenv("AI_HTTP_TIMEOUT", "30"))
+CONNECT_TIMEOUT = float(os.getenv("AI_CONNECT_TIMEOUT", "8"))
+REQUEST_BUDGET = float(os.getenv("AI_REQUEST_BUDGET", "15"))
 
 app = FastAPI(
     title="SmartBancs AI Service",
     description="Agente de IA (Python/FastAPI) para recomendaciones no bloqueantes.",
-    version="1.0.0",
+    version="1.0.1",
 )
 
-provider = RecommendationProvider(Options(api_key=API_KEY, model=MODEL, timeout_seconds=TIMEOUT))
+provider = RecommendationProvider(
+    Options(
+        api_key=API_KEY,
+        model=MODEL,
+        timeout_seconds=TIMEOUT,
+        connect_timeout_seconds=CONNECT_TIMEOUT,
+        request_budget_seconds=REQUEST_BUDGET,
+    )
+)
 
 
 @app.on_event("startup")

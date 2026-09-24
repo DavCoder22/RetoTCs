@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 CAMEL_ALIASES = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -45,11 +45,50 @@ class TxnContext(BaseModel):
 
 
 class AiRecommendationRequest(BaseModel):
-    """Solicitud de generación de recomendación (DTO de entrada)."""
+    """Solicitud de generación de recomendación (DTO de entrada).
 
-    model_config = CAMEL_ALIASES
+    Acepta el contrato oficial del smartbancs-api (envuelto en ``context``)
+    o el mismo contexto de forma plana (compatibilidad con pruebas directas
+    y/o clientes que serialicen el TxnContext sin el wrapper).
+    """
+
+    model_config = ConfigDict(
+        **CAMEL_ALIASES,
+        json_schema_extra={
+            "example": {
+                "context": {
+                    "transactionId": "3f28d8f4-6b2d-4c1e-9a5b-7d0c2f9e1a4b",
+                    "customerId": "9e8f7d6c-5b4a-4a3b-9c2d-1e0f3a5b7c9d",
+                    "customerSegment": "PREMIUM",
+                    "accountAgeDays": 320,
+                    "type": "TRANSFER",
+                    "amount": 1200.00,
+                    "currency": "PEN",
+                    "debitAccountNumber": "4601000000000001",
+                    "creditAccountNumber": "4601000000000002",
+                    "balanceAfterDebit": 4300.00,
+                    "balanceAfterCredit": 5800.00,
+                    "reference": "Viaje a Cusco",
+                    "createdAt": "2026-09-21T21:58:20.619198Z",
+                }
+            }
+        },
+    )
 
     context: TxnContext = Field(description="Contexto transaccional homogeneizado")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_wrapped_or_flat(cls, data):
+        """Normaliza la entrada: envuelve el contexto plano en ``context``.
+
+        - ``{"context": {...}}``  -> pase directo (contrato del api Java).
+        - ``{...cliente plano...}`` -> se envuelve para no romper llamadas
+          directas con la misma forma del AiRecommendationContext.
+        """
+        if isinstance(data, dict) and "context" not in data:
+            return {"context": data}
+        return data
 
 
 class AiRecommendationResponse(BaseModel):
