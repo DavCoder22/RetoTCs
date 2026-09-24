@@ -55,7 +55,7 @@ services:
     container_name: smartbancs-ai-service
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-moonshotai/kimi-k2.6}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-4o-mini}
     ports:
       - "8081:8081"
     healthcheck:

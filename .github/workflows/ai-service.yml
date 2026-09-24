@@ -17,7 +17,7 @@ on:
     paths: [ai-service/**, .github/workflows/ai-service.yml]
 
 env:
-  AI_MODEL: moonshotai/kimi-k2.6
+  AI_MODEL: openai/gpt-4o-mini
 
 jobs:
   verify-openrouter:
