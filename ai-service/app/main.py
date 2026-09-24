@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from typing import Annotated
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
 from .import metrics
@@ -34,8 +35,13 @@ REQUEST_BUDGET = float(os.getenv("AI_REQUEST_BUDGET", "15"))
 app = FastAPI(
     title="SmartBancs AI Service",
     description="Agente de IA (Python/FastAPI) para recomendaciones no bloqueantes.",
-    version="1.0.1",
+    version="1.1.0",
 )
+
+# Registro en memoria de las recomendaciones generadas por este servicio,
+# indexado por customerId. Permite consultar en /docs la lista de
+# recomendaciones "registradas" sin depender de ninguna base de datos.
+_REGISTRY: dict[str, list[AiRecommendationResponse]] = {}
 
 provider = RecommendationProvider(
     Options(
@@ -86,6 +92,8 @@ async def recommendations(body: AiRecommendationRequest = Body(...)) -> AiRecomm
     started = time.perf_counter()
     try:
         result = await provider.generate(body)
+        key = str(body.context.customer_id)
+        _REGISTRY[key] = [*_REGISTRY.get(key, []), result][-20:]
         metrics.inc("smartbancs_ai_requests_total")
         metrics.inc(f"smartbancs_ai_recommendations_total{{source=\"{result.source}\",category=\"{result.category}\"}}")
     except Exception as exc:  # noqa: BLE001
@@ -95,3 +103,11 @@ async def recommendations(body: AiRecommendationRequest = Body(...)) -> AiRecomm
     finally:
         metrics.observe("smartbancs_ai_duration_seconds_total", time.perf_counter() - started)
     return result
+
+
+@app.get("/recommendations", response_model=list[AiRecommendationResponse])
+async def recommendations_list(
+    customer_id: Annotated[str, Query(alias="customerId", description="Cliente (cédula lógica)")] = ...,
+) -> list[AiRecommendationResponse]:
+    """Lista las recomendaciones registradas (generadas por este servicio) para un cliente."""
+    return _REGISTRY.get(customer_id, [])

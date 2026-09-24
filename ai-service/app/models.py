@@ -26,9 +26,9 @@ class TxnContext(BaseModel):
     customer_id: uuid.UUID = Field(description="Cliente (cédula lógica) asociado a la operación")
     customer_segment: Optional[str] = Field(default=None, description="RETAIL | PREMIUM | CORPORATE (info general del cliente)")
     account_age_days: Optional[int] = Field(default=None, ge=0, description="Antigüedad de la cuenta primaria en días")
-    type: str = Field(description="DEPOSIT | WITHDRAWAL | TRANSFER | PAYMENT")
-    amount: Decimal = Field(gt=0, description="Monto en la moneda de la cuenta")
-    currency: str = Field(min_length=3, max_length=3, description="ISO-4217 (PEN/USD)")
+    type: str = Field(default="TRANSFER", description="DEPOSIT | WITHDRAWAL | TRANSFER | PAYMENT (default TRANSFER)")
+    amount: Decimal = Field(default=Decimal("100.0"), gt=0, description="Monto en la moneda de la cuenta (default 100.00)")
+    currency: str = Field(default="PEN", min_length=3, max_length=3, description="ISO-4217 (PEN/USD, default PEN)")
     debit_account_number: Optional[str] = Field(default=None, description="Cuenta débito (número de negocio)")
     credit_account_number: Optional[str] = Field(default=None, description="Cuenta crédito (número de negocio)")
     balance_after_debit: Optional[Decimal] = Field(default=None, description="Saldo posterior de la cuenta débito")
@@ -56,26 +56,12 @@ class AiRecommendationRequest(BaseModel):
         **CAMEL_ALIASES,
         json_schema_extra={
             "example": {
-                "context": {
-                    "transactionId": "3f28d8f4-6b2d-4c1e-9a5b-7d0c2f9e1a4b",
-                    "customerId": "9e8f7d6c-5b4a-4a3b-9c2d-1e0f3a5b7c9d",
-                    "customerSegment": "PREMIUM",
-                    "accountAgeDays": 320,
-                    "type": "TRANSFER",
-                    "amount": 1200.00,
-                    "currency": "PEN",
-                    "debitAccountNumber": "4601000000000001",
-                    "creditAccountNumber": "4601000000000002",
-                    "balanceAfterDebit": 4300.00,
-                    "balanceAfterCredit": 5800.00,
-                    "reference": "Viaje a Cusco",
-                    "createdAt": "2026-09-21T21:58:20.619198Z",
-                }
+                "customerId": "9e8f7d6c-5b4a-4a3b-9c2d-1e0f3a5b7c9d",
             }
         },
     )
 
-    context: TxnContext = Field(description="Contexto transaccional homogeneizado")
+    context: TxnContext = Field(description="Contexto transaccional homogeneizado (solo customerId es obligatorio)")
 
     @model_validator(mode="before")
     @classmethod
