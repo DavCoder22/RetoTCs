@@ -37,6 +37,12 @@ scripts/evidencia/
 # Runbook local de demo en producción (no se commitea; incluye IPs/URLs del entorno)
 docs/GUIA_DEMO_PRODUCCION.md
 
+# Guía local de repaso (no se commitea): plantilla de datos, DTOs y generación de IDs
+docs/PORQUE_PLANTILLA_DTOS_IDS.md
+
+# Runbook local de onboarding (no se commitea; incluye IPs/URLs del entorno)
+docs/RUNBOOK_ONBOARDING.md
+
 # Environment and secrets (keep example files)
 .env
 .env.*
