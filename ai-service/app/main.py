@@ -12,9 +12,8 @@ import logging
 import os
 import time
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
-from pydantic import ValidationError
 
 from .import metrics
 from .models import AiRecommendationRequest, AiRecommendationResponse
@@ -27,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger("smartbancs-ai")
 
 API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-MODEL = os.getenv("AI_MODEL", "moonshotai/kimi-k2.6").strip() or "moonshotai/kimi-k2.6"
+MODEL = os.getenv("AI_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
 TIMEOUT = float(os.getenv("AI_HTTP_TIMEOUT", "30"))
 CONNECT_TIMEOUT = float(os.getenv("AI_CONNECT_TIMEOUT", "8"))
 REQUEST_BUDGET = float(os.getenv("AI_REQUEST_BUDGET", "15"))
@@ -83,17 +82,12 @@ async def metrics_endpoint() -> str:
 
 
 @app.post("/internal/recommendations", response_model=AiRecommendationResponse)
-async def recommendations(request: Request) -> AiRecommendationResponse:
+async def recommendations(body: AiRecommendationRequest = Body(...)) -> AiRecommendationResponse:
     started = time.perf_counter()
     try:
-        body = await request.json()
-        payload = AiRecommendationRequest.model_validate(body)
-        result = await provider.generate(payload)
+        result = await provider.generate(body)
         metrics.inc("smartbancs_ai_requests_total")
         metrics.inc(f"smartbancs_ai_recommendations_total{{source=\"{result.source}\",category=\"{result.category}\"}}")
-    except ValidationError as exc:
-        metrics.inc("smartbancs_ai_validation_errors_total")
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except Exception as exc:  # noqa: BLE001
         metrics.inc("smartbancs_ai_errors_total")
         logger.exception("ai_request_failed")
