@@ -60,6 +60,9 @@ public class AccountService {
         if (!customerRepository.existsById(customerId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "customer does not exist");
         }
+        if (accountRepository.existsByAccountNumber(accountNumber.trim())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "account number already exists");
+        }
         if (balance.signum() != 0) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "initial balance must be justified by a DEPOSIT transaction: "
