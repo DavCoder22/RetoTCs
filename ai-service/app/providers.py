@@ -13,6 +13,7 @@ modelo o el mock. Así el consumo de la API es óptimo y predecible.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from decimal import Decimal
@@ -159,17 +160,28 @@ def _normalize(data: dict) -> dict:
 
 
 class Options:
-    def __init__(self, api_key: str | None, model: str, timeout_seconds: float = 30.0) -> None:
+    def __init__(self, api_key: str | None, model: str, timeout_seconds: float = 30.0,
+                 connect_timeout_seconds: float = 8.0, request_budget_seconds: float = 15.0) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.connect_timeout_seconds = connect_timeout_seconds
+        self.request_budget_seconds = request_budget_seconds
 
 
 class RecommendationProvider:
     def __init__(self, options: Options) -> None:
         self._options = options
+        # Timeouts por fase: la CONEXIÓN falla rápido (si OpenRouter no responde,
+        # el agente cae a mock en segundos), mientras la LECTURA mantiene un
+        # margen realista para el modelo (generación de texto ~segundos).
         self._client = httpx.AsyncClient(
-            timeout=options.timeout_seconds,
+            timeout=httpx.Timeout(
+                connect=options.connect_timeout_seconds,
+                write=options.timeout_seconds,
+                read=options.timeout_seconds,
+                pool=options.timeout_seconds,
+            ),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
 
@@ -180,9 +192,18 @@ class RecommendationProvider:
         if not self._options.api_key:
             return self._fallback(request, reason="no OPENROUTER_API_KEY configured")
         try:
-            data = await self._call_openrouter(request)
+            # Presupuesto TOTAL de la llamada: si el proveedor no responde en
+            # `request_budget_seconds`, caemos a mock. Garantiza que el endpoint
+            # SIEMPRE conteste en un tiempo acotado (el flujo transaccional es
+            # asíncrono y jamás debe quedarse colgado esperando al modelo).
+            data = await asyncio.wait_for(
+                self._call_openrouter(request), timeout=self._options.request_budget_seconds
+            )
             source, model = "openrouter", self._options.model
             logger.info("ai_recommendation source='openrouter' model='%s' category='%s'", model, data.get("category"))
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            logger.warning("ai_recommendation timeout_after=%.0fs fallback_to_mock", self._options.request_budget_seconds)
+            return self._fallback(request, reason=f"openrouter timeout after {self._options.request_budget_seconds:g}s")
         except Exception as exc:  # noqa: BLE001 — el agente nunca debe tumbar la transacción
             logger.warning("ai_recommendation fallback_to_mock error='%s'", exc)
             return self._fallback(request, reason=str(exc))

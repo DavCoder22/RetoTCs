@@ -240,6 +240,10 @@ curl -s http://localhost:8081/health               # Agente de IA (FastAPI)
    dashboard **"SmartBancs – Observabilidad"**; métricas en `:9090`, trazas en
    `:3200`, logs en `:3100`.
 9. **Evidencia reproducible**: `./scripts/demo.sh` (ver §11).
+10. **Prueba de estrés (k6)**: `./scripts/stress.sh` lanza 10.000
+    transferencias de 0.01 tras el CRUD completo y las envía a Prometheus
+    (remote write); observables en Grafana (`k6_*`). Detalle en
+    [`docs/GUIA_DEMO_SWAGGER.md §9`](docs/GUIA_DEMO_SWAGGER.md).
 
 **5.1 Puertos de la solución (servicios y observabilidad):**
 
@@ -283,10 +287,69 @@ docker compose down            # apaga servicios
 docker compose down -v         # apaga y borra los volúmenes (datos)
 ```
 
-> **Docker rootless (Linux).** Si `promtail` no encuentra el daemon, exporta las
-> rutas antes de `docker compose up`:
-> `DOCKER_SOCKET=/run/user/$UID/docker.sock` y
-> `DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers`.
+> **Docker rootless (Linux).** Ajustes posibles:
+>
+> **1. `promtail` no encuentra el daemon** (error `creating mount source path
+> '/var/lib/docker/containers'`): en rootless el socket y los contenedores no
+> están en las rutas por defecto. Exporta antes de `docker compose up`
+> (o ponlos en `.env`, está en `.gitignore`):
+>
+> ```bash
+> export DOCKER_SOCKET=/run/user/$UID/docker.sock
+> export DOCKER_CONTAINERS_DIR=$HOME/.local/share/docker/containers
+> ```
+> Verifica las rutas reales con `docker info | grep "Docker Root Dir"`.
+>
+> **2. Egreso de contenedores roto (timeouts a internet).** Síntoma: el agente
+> de IA cae a `source: "mock"` aun teniendo `OPENROUTER_API_KEY`, porque el
+> `httpx.ConnectTimeout` a OpenRouter nunca se resuelve. Ocurre con
+> **slirp4netns** (driver de red por defecto de rootless) en kernels recientes
+> (p. ej. 7.x). La solución es cambiar el driver rootless a **pasta**
+> (`passt`), soportado nativamente por rootlesskit ≥ 3.1:
+>
+> ```bash
+> sudo pacman -S passt          # Arch/Manjaro (en otras distros busca "passt")
+> ```
+>
+> ```ini
+> # ~/.config/systemd/user/docker.service.d/override.conf
+> [Service]
+> Environment="DOCKERD_ROOTLESS_ROOTLESSKIT_NET=pasta"
+> Environment="DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=implicit"
+> ```
+>
+> ```bash
+> systemctl --user daemon-reload && systemctl --user restart docker
+> ```
+>
+> Diagnóstico rápido: si un contenedor cualquiera puede resolver DNS pero todo
+> TCP externo muere (`docker run --rm python:3.12-alpine python -c "import
+> socket; socket.setdefaulttimeout(6); socket.create_connection(('1.1.1.1',
+> 443))"` → `TimeoutError`), es este problema y no del stack.
+>
+> **3. Build de la API roto: Maven no resuelve `repo.maven.apache.org`.**
+> Síntoma: el `docker compose build` del módulo Java muere con
+> `Unknown host repo.maven.apache.org: Temporary failure in name resolution`.
+> Con `pasta` el DNS interno `10.0.2.3` de rootless a veces no reenvía. La
+> solución es fijar DNS públicos en el daemon rootless:
+>
+> ```json
+> // ~/.config/docker/daemon.json
+> { "dns": ["8.8.8.8", "8.8.4.4"] }
+> ```
+>
+> ```bash
+> systemctl --user restart docker
+> ```
+>
+> **4. WARN `buildx Docker CLI plugin not found`.** docker compose cae al
+> builder clásico. Instala buildx como plugin de usuario (sin sudo):
+>
+> ```bash
+> mkdir -p ~/.docker/cli-plugins
+> curl -sL https://github.com/docker/buildx/releases/latest/download/buildx-$(curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4).linux-amd64 \
+>   -o ~/.docker/cli-plugins/docker-buildx && chmod +x ~/.docker/cli-plugins/docker-buildx
+> ```
 
 ## 8. Agente de IA (recomendaciones)
 

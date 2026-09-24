@@ -99,6 +99,12 @@ docker compose up --build -d
 > docker compose up -d
 > ```
 > En Docker Desktop / Docker rootful no hace falta nada extra.
+>
+> **Egreso de contenedores (rootless + kernel reciente):** si los servicios
+> resuelven DNS pero todo TCP externo muere en timeout (p. ej. el agente de IA no
+> llega a OpenRouter y cae a mock), es `slirp4netns` incompatible con tu kernel.
+> Cambia el driver rootless a **pasta** (ver paso a paso en el README §7
+> "Docker rootless").
 
 ## Accesos
 
